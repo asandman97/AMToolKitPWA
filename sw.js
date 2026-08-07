@@ -1,6 +1,6 @@
 /* Fieldmark service worker.
    Bump VERSION whenever you change index.html, or phones keep the old copy. */
-const VERSION = 'v1';
+const VERSION = 'v2';
 const SHELL = 'fieldmark-shell-' + VERSION;
 const RUNTIME = 'fieldmark-runtime-' + VERSION;
 
