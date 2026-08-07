@@ -1,0 +1,661 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Fieldmark</title>
+
+<link rel="manifest" href="./manifest.json">
+<meta name="theme-color" content="#12161C">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Fieldmark">
+<link rel="apple-touch-icon" href="./icon-192.png">
+
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<style>
+:root{
+  --ink:#12161C;
+  --slate:#1B222C;
+  --edge:#303B49;
+  --paper:#E8EBEF;
+  --muted:#8A97A6;
+  --flag:#FF2E88;
+  --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+  --top:env(safe-area-inset-top,0px);
+  --bot:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--ink);color:var(--paper);
+  font-family:var(--sans);overscroll-behavior:none}
+#map{position:absolute;inset:0;background:var(--ink)}
+#map.drawing{touch-action:none;cursor:crosshair}
+
+/* ---- readout: the instrument strip ---- */
+#readout{
+  position:absolute;top:calc(var(--top) + 10px);left:10px;z-index:600;
+  background:rgba(18,22,28,.82);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  border:1px solid var(--edge);border-radius:10px;padding:7px 10px;
+  font-family:var(--mono);font-size:10.5px;line-height:1.45;letter-spacing:.04em;
+  color:var(--muted);pointer-events:none;max-width:62vw;
+}
+#readout b{color:var(--paper);font-weight:600}
+#measure{color:var(--flag);display:none}
+#measure.on{display:block}
+
+/* ---- round buttons, top right ---- */
+#aux{position:absolute;top:calc(var(--top) + 10px);right:10px;z-index:600;
+  display:flex;flex-direction:column;gap:8px}
+.round{
+  width:42px;height:42px;border-radius:12px;display:grid;place-items:center;
+  background:rgba(18,22,28,.82);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+  border:1px solid var(--edge);color:var(--paper);
+}
+.round:active{background:var(--slate)}
+.round svg{width:19px;height:19px}
+
+/* ---- tool bar ---- */
+#tools{
+  position:absolute;left:10px;right:10px;bottom:calc(var(--bot) + 10px);z-index:600;
+  display:flex;gap:3px;padding:5px;
+  background:rgba(18,22,28,.85);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  border:1px solid var(--edge);border-radius:15px;
+}
+.tool{
+  flex:1;min-width:0;border:0;background:transparent;color:var(--muted);
+  padding:7px 2px 6px;border-radius:11px;display:grid;justify-items:center;gap:3px;
+}
+.tool svg{width:19px;height:19px}
+.tool span{font-family:var(--mono);font-size:8.5px;letter-spacing:.09em;text-transform:uppercase}
+.tool[aria-pressed="true"]{background:var(--flag);color:#12161C}
+.tool:active{color:var(--paper)}
+.tool[aria-pressed="true"]:active{color:#12161C}
+
+/* ---- in-progress bar ---- */
+#pending{
+  position:absolute;left:10px;right:10px;bottom:calc(var(--bot) + 80px);z-index:601;
+  display:none;gap:6px;
+}
+#pending.on{display:flex}
+#pending button{
+  flex:1;font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+  padding:11px 6px;border-radius:12px;border:1px solid var(--edge);
+  background:rgba(18,22,28,.9);backdrop-filter:blur(12px);color:var(--paper);
+}
+#pending button.go{background:var(--flag);border-color:var(--flag);color:#12161C;font-weight:600}
+
+/* ---- settings sheet ---- */
+#sheet{
+  position:absolute;inset:0;z-index:800;background:var(--ink);
+  transform:translateY(100%);transition:transform .28s cubic-bezier(.32,.72,0,1);
+  display:flex;flex-direction:column;
+}
+#sheet.on{transform:translateY(0)}
+@media (prefers-reduced-motion:reduce){#sheet{transition:none}}
+.sheet-top{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:calc(var(--top) + 14px) 16px 12px;border-bottom:1px solid var(--edge);
+}
+.sheet-top h1{margin:0;font-size:17px;font-weight:640;letter-spacing:-.01em}
+.sheet-top button{
+  background:var(--slate);border:1px solid var(--edge);color:var(--paper);
+  font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+  padding:8px 13px;border-radius:10px;
+}
+.sheet-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;
+  padding:20px 16px calc(var(--bot) + 40px)}
+.group{margin-bottom:30px}
+.eyebrow{
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--flag);margin-bottom:9px;
+}
+.hint{color:var(--muted);font-size:12.5px;line-height:1.5;margin:7px 0 0}
+label{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--muted);margin:13px 0 5px}
+input[type=text],input[type=number],textarea,select{
+  width:100%;background:var(--slate);border:1px solid var(--edge);color:var(--paper);
+  border-radius:10px;padding:11px 12px;font-family:var(--mono);font-size:13px;
+}
+textarea{min-height:110px;resize:vertical;line-height:1.45}
+input:focus,textarea:focus,select:focus{outline:2px solid var(--flag);outline-offset:1px}
+.row{display:flex;gap:8px}
+.row>*{flex:1}
+.btn{
+  width:100%;background:var(--slate);border:1px solid var(--edge);color:var(--paper);
+  font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;
+  padding:13px;border-radius:11px;margin-top:9px;
+}
+.btn.primary{background:var(--flag);border-color:var(--flag);color:#12161C;font-weight:640}
+.btn.danger{color:#FF6B6B;border-color:#4A2730}
+.presets{display:flex;flex-wrap:wrap;gap:6px}
+.presets button{
+  background:var(--slate);border:1px solid var(--edge);color:var(--paper);
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.05em;
+  padding:9px 11px;border-radius:9px;
+}
+.presets button.on{border-color:var(--flag);color:var(--flag)}
+.swatches{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.sw{width:38px;height:38px;border-radius:11px;border:2px solid var(--edge)}
+.sw.on{border-color:var(--paper);transform:scale(1.06)}
+input[type=range]{width:100%;accent-color:var(--flag)}
+input[type=color]{width:38px;height:38px;padding:0;border:2px solid var(--edge);
+  border-radius:11px;background:var(--slate)}
+
+/* ---- toast ---- */
+#toast{
+  position:absolute;left:50%;bottom:calc(var(--bot) + 92px);transform:translateX(-50%) translateY(8px);
+  z-index:900;background:var(--slate);border:1px solid var(--edge);color:var(--paper);
+  padding:10px 15px;border-radius:11px;font-size:13px;max-width:86vw;text-align:center;
+  opacity:0;pointer-events:none;transition:opacity .2s,transform .2s;
+}
+#toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+
+.leaflet-control-attribution{
+  background:rgba(18,22,28,.78)!important;color:var(--muted)!important;
+  font-size:9px!important;font-family:var(--mono)!important;padding:2px 6px!important;
+  margin:0 0 calc(var(--bot) + 72px) 0!important;border-radius:6px 0 0 6px!important;
+}
+.leaflet-control-attribution a{color:var(--muted)!important}
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div id="readout">
+  <div><b id="rCoord">—</b> · z<b id="rZoom">—</b></div>
+  <div><b id="rCount">0</b> marks · <span id="rTool">pan</span></div>
+  <div id="measure"></div>
+</div>
+
+<div id="aux">
+  <button class="round" id="bLocate" aria-label="Find my location">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+      <circle cx="12" cy="12" r="3.2"/><circle cx="12" cy="12" r="8"/>
+      <path d="M12 1.5v2.5M12 20v2.5M22.5 12H20M4 12H1.5"/></svg>
+  </button>
+  <button class="round" id="bUndo" aria-label="Undo last mark">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 9h11a5 5 0 0 1 0 10H8"/><path d="M7 5 3 9l4 4"/></svg>
+  </button>
+  <button class="round" id="bSettings" aria-label="Open settings">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+      <circle cx="12" cy="12" r="3"/>
+      <path d="M19.4 15a1.6 1.6 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.6 1.6 0 0 0-2.7 1.1V21a2 2 0 1 1-4 0v-.1A1.6 1.6 0 0 0 7.9 19.4l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1A1.6 1.6 0 0 0 3 13.9H3a2 2 0 1 1 0-4h.1A1.6 1.6 0 0 0 4.6 7.9l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.6 1.6 0 0 0 1.8.3H9.3A1.6 1.6 0 0 0 10.4 4V3a2 2 0 1 1 4 0v.1a1.6 1.6 0 0 0 2.7 1.1l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.6 1.6 0 0 0-.3 1.8v.1a1.6 1.6 0 0 0 1.4.9H21a2 2 0 1 1 0 4h-.1a1.6 1.6 0 0 0-1.5 1.1z"/></svg>
+  </button>
+</div>
+
+<div id="pending">
+  <button id="pCancel">Cancel</button>
+  <button id="pBack">Undo point</button>
+  <button id="pDone" class="go">Finish</button>
+</div>
+
+<nav id="tools">
+  <button class="tool" data-tool="pan" aria-pressed="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M9 11V4.5a1.5 1.5 0 0 1 3 0V11m0-1.5a1.5 1.5 0 0 1 3 0V12m0-1a1.5 1.5 0 0 1 3 0v5.5a5.5 5.5 0 0 1-5.5 5.5H11a5 5 0 0 1-4.3-2.5L4 15a1.6 1.6 0 0 1 2.6-1.8L9 15.5"/></svg>
+    <span>Pan</span></button>
+  <button class="tool" data-tool="freehand" aria-pressed="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M3 17.5c3-6.5 5-9.5 7-9.5s1.5 8 3.5 8 3.5-6 7.5-11.5"/></svg>
+    <span>Draw</span></button>
+  <button class="tool" data-tool="line" aria-pressed="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M4.5 19 10 10l4 4 5.5-9"/><circle cx="4.5" cy="19" r="1.8"/><circle cx="19.5" cy="5" r="1.8"/></svg>
+    <span>Line</span></button>
+  <button class="tool" data-tool="polygon" aria-pressed="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round">
+      <path d="M12 3.5 20.5 10l-3.3 10H6.8L3.5 10z"/></svg>
+    <span>Area</span></button>
+  <button class="tool" data-tool="point" aria-pressed="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round">
+      <path d="M12 21.5s7-6.4 7-11.5a7 7 0 1 0-14 0c0 5.1 7 11.5 7 11.5z"/><circle cx="12" cy="10" r="2.4"/></svg>
+    <span>Pin</span></button>
+  <button class="tool" data-tool="erase" aria-pressed="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M8.5 20.5H20"/><path d="m13.5 4.5 6 6-8 8H6l-2.5-2.5a1.5 1.5 0 0 1 0-2.1z"/></svg>
+    <span>Erase</span></button>
+</nav>
+
+<div id="toast"></div>
+
+<!-- ================= SETTINGS ================= -->
+<section id="sheet" aria-hidden="true">
+  <div class="sheet-top">
+    <h1>Settings</h1>
+    <button id="bClose">Done</button>
+  </div>
+  <div class="sheet-body">
+
+    <div class="group">
+      <div class="eyebrow">Base map</div>
+      <div class="presets" id="presets"></div>
+      <label for="fUrl">Tile URL template</label>
+      <input type="text" id="fUrl" autocapitalize="off" autocorrect="off" spellcheck="false"
+             placeholder="https://tile.example.com/{z}/{x}/{y}.png">
+      <p class="hint">Uses <b>{z}</b> zoom, <b>{x}</b>/<b>{y}</b> tile column and row, <b>{s}</b> subdomain,
+         <b>{r}</b> for @2x retina tiles. Some providers swap the order to {z}/{y}/{x}.</p>
+      <label for="fAttr">Attribution</label>
+      <input type="text" id="fAttr" placeholder="© Map data provider">
+      <div class="row">
+        <div>
+          <label for="fSub">Subdomains</label>
+          <input type="text" id="fSub" placeholder="abc" autocapitalize="off">
+        </div>
+        <div>
+          <label for="fMax">Max zoom</label>
+          <input type="number" id="fMax" min="1" max="24" placeholder="19">
+        </div>
+      </div>
+      <button class="btn primary" id="bApply">Use this map</button>
+      <p class="hint">Tile servers set their own usage policies. For anything beyond personal use,
+         sign up with the provider and use your own key.</p>
+    </div>
+
+    <div class="group">
+      <div class="eyebrow">Ink</div>
+      <div class="swatches" id="swatches"></div>
+      <label for="fWeight">Stroke width — <span id="wVal">4</span>px</label>
+      <input type="range" id="fWeight" min="2" max="12" step="1">
+    </div>
+
+    <div class="group">
+      <div class="eyebrow">Marks</div>
+      <p class="hint" id="stat">Nothing drawn yet.</p>
+      <button class="btn" id="bCopy">Copy GeoJSON</button>
+      <button class="btn" id="bDownload">Download .geojson</button>
+      <label for="fImport">Paste GeoJSON to load</label>
+      <textarea id="fImport" placeholder='{"type":"FeatureCollection","features":[…]}'
+                autocapitalize="off" autocorrect="off" spellcheck="false"></textarea>
+      <button class="btn" id="bImport">Load marks</button>
+      <button class="btn danger" id="bClear">Erase everything</button>
+    </div>
+
+  </div>
+</section>
+
+<script>
+/* ============ storage that degrades quietly ============ */
+const mem = {};
+const store = {
+  get(k, fb){ try{ const v = localStorage.getItem('fm.'+k); return v===null ? (k in mem ? mem[k] : fb) : JSON.parse(v); }
+              catch(e){ return k in mem ? mem[k] : fb; } },
+  set(k, v){ mem[k] = v; try{ localStorage.setItem('fm.'+k, JSON.stringify(v)); }catch(e){} }
+};
+
+/* ============ base map presets ============ */
+const PRESETS = [
+  { name:'OpenStreetMap', url:'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+    attribution:'© OpenStreetMap contributors', subdomains:'abc', maxZoom:19 },
+  { name:'Humanitarian', url:'https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png',
+    attribution:'© OpenStreetMap contributors, tiles © HOT', subdomains:'abc', maxZoom:19 },
+  { name:'Topo', url:'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
+    attribution:'© OpenStreetMap contributors, SRTM · © OpenTopoMap (CC-BY-SA)', subdomains:'abc', maxZoom:17 },
+  { name:'Light', url:'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+    attribution:'© OpenStreetMap contributors © CARTO', subdomains:'abcd', maxZoom:20 },
+  { name:'Dark', url:'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+    attribution:'© OpenStreetMap contributors © CARTO', subdomains:'abcd', maxZoom:20 },
+  { name:'Satellite', url:'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    attribution:'Tiles © Esri', subdomains:'abc', maxZoom:19 }
+];
+const COLORS = ['#FF2E88','#FF7A1A','#B6FF3C','#22D3EE','#FFFFFF','#111111'];
+
+/* ============ state ============ */
+const state = {
+  tool: 'pan',
+  color: store.get('color', COLORS[0]),
+  weight: store.get('weight', 4),
+  base: store.get('base', PRESETS[0]),
+  view: store.get('view', { lat:51.5074, lng:-0.1278, zoom:13 })
+};
+let features = [];          // {id,kind,pts,color,weight,layer}
+let draft = null;           // in-progress line/area
+const $ = s => document.querySelector(s);
+
+/* ============ map ============ */
+const map = L.map('map', { zoomControl:false, doubleClickZoom:false, attributionControl:true })
+  .setView([state.view.lat, state.view.lng], state.view.zoom);
+const canvas = map.getContainer();
+let tiles = null;
+
+function applyBase(b){
+  if(tiles) map.removeLayer(tiles);
+  tiles = L.tileLayer(b.url, {
+    attribution: b.attribution || '',
+    subdomains: b.subdomains || 'abc',
+    maxZoom: Number(b.maxZoom) || 19,
+    detectRetina: /\{r\}/.test(b.url)
+  }).addTo(map);
+  map.setMaxZoom(Number(b.maxZoom) || 19);
+  let missed = 0;
+  tiles.on('tileerror', () => { if(++missed === 4) toast('Tiles aren’t loading. Check the URL in Settings.'); });
+  state.base = b; store.set('base', b);
+  markActivePreset();
+}
+applyBase(state.base);
+
+/* ============ readout ============ */
+function refresh(){
+  const c = map.getCenter();
+  $('#rCoord').textContent = c.lat.toFixed(4) + ' ' + c.lng.toFixed(4);
+  $('#rZoom').textContent = map.getZoom();
+  $('#rCount').textContent = features.length;
+  $('#rTool').textContent = state.tool;
+}
+map.on('move zoom', refresh);
+map.on('moveend zoomend', () => {
+  const c = map.getCenter();
+  store.set('view', { lat:c.lat, lng:c.lng, zoom:map.getZoom() });
+});
+
+/* ============ measuring ============ */
+const R = 6378137, rad = d => d * Math.PI / 180;
+function lengthOf(pts){ let d = 0; for(let i=1;i<pts.length;i++) d += map.distance(pts[i-1], pts[i]); return d; }
+function areaOf(pts){
+  if(pts.length < 3) return 0;
+  let a = 0;
+  for(let i=0;i<pts.length;i++){
+    const p1 = pts[i], p2 = pts[(i+1) % pts.length];
+    a += rad(p2.lng - p1.lng) * (2 + Math.sin(rad(p1.lat)) + Math.sin(rad(p2.lat)));
+  }
+  return Math.abs(a * R * R / 2);
+}
+const fmtLen  = m => m < 1000 ? Math.round(m) + ' m' : (m/1000).toFixed(2) + ' km';
+const fmtArea = m => m < 10000 ? Math.round(m) + ' m²'
+                 : m < 1000000 ? (m/10000).toFixed(2) + ' ha'
+                 : (m/1000000).toFixed(2) + ' km²';
+function showMeasure(txt){
+  const el = $('#measure');
+  if(txt){ el.textContent = txt; el.classList.add('on'); } else el.classList.remove('on');
+}
+
+/* ============ features ============ */
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2,6);
+
+function render(f){
+  if(f.layer) map.removeLayer(f.layer);
+  const style = { color:f.color, weight:f.weight, lineCap:'round', lineJoin:'round', interactive:false };
+  if(f.kind === 'point'){
+    f.layer = L.circleMarker(f.pts[0], { ...style, radius:Math.max(5, f.weight+2), fillColor:f.color, fillOpacity:.9, color:'#fff', weight:2 });
+  } else if(f.kind === 'polygon'){
+    f.layer = L.polygon(f.pts, { ...style, fillColor:f.color, fillOpacity:.18 });
+  } else {
+    f.layer = L.polyline(f.pts, style);
+  }
+  f.layer.addTo(map);
+}
+function add(kind, pts){
+  const f = { id:uid(), kind, pts:pts.map(p => L.latLng(p)), color:state.color, weight:state.weight };
+  features.push(f); render(f); save(); refresh();
+  return f;
+}
+function remove(f){
+  if(f.layer) map.removeLayer(f.layer);
+  features = features.filter(x => x !== f); save(); refresh();
+}
+function save(){
+  store.set('marks', features.map(f => ({
+    id:f.id, kind:f.kind, color:f.color, weight:f.weight,
+    pts:f.pts.map(p => [ +p.lat.toFixed(6), +p.lng.toFixed(6) ])
+  })));
+}
+function load(){
+  features.forEach(f => f.layer && map.removeLayer(f.layer));
+  features = (store.get('marks', []) || []).map(o => ({ ...o, pts:o.pts.map(p => L.latLng(p[0], p[1])) }));
+  features.forEach(render); refresh();
+}
+load();
+
+/* ============ tools ============ */
+function setTool(t){
+  state.tool = t;
+  document.querySelectorAll('.tool').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.tool === t)));
+  canvas.classList.toggle('drawing', t === 'freehand');
+  if(t === 'freehand') map.dragging.disable(); else map.dragging.enable();
+  cancelDraft();
+  refresh();
+}
+document.querySelectorAll('.tool').forEach(b => b.addEventListener('click', () => setTool(b.dataset.tool)));
+
+/* --- freehand --- */
+let stroke = null, last = null;
+canvas.addEventListener('pointerdown', e => {
+  if(state.tool !== 'freehand' || e.button > 0) return;
+  canvas.setPointerCapture(e.pointerId);
+  stroke = [ at(e) ]; last = [e.clientX, e.clientY];
+  if(navigator.vibrate) navigator.vibrate(4);
+});
+canvas.addEventListener('pointermove', e => {
+  if(!stroke) return;
+  e.preventDefault();
+  if(Math.hypot(e.clientX-last[0], e.clientY-last[1]) < 3) return;
+  last = [e.clientX, e.clientY];
+  stroke.push(at(e));
+  if(stroke.length === 2) draft = L.polyline(stroke, { color:state.color, weight:state.weight, lineCap:'round', dashArray:'1 7' }).addTo(map);
+  else if(draft) draft.setLatLngs(stroke);
+  if(stroke.length > 1) showMeasure('drawing · ' + fmtLen(lengthOf(stroke)));
+}, { passive:false });
+function endStroke(){
+  if(!stroke) return;
+  if(draft){ map.removeLayer(draft); draft = null; }
+  if(stroke.length > 1) add('line', stroke);
+  stroke = null; showMeasure('');
+}
+canvas.addEventListener('pointerup', endStroke);
+canvas.addEventListener('pointercancel', endStroke);
+function at(e){
+  const r = canvas.getBoundingClientRect();
+  return map.containerPointToLatLng([ e.clientX - r.left, e.clientY - r.top ]);
+}
+
+/* --- tap-to-place: line, area, pin, erase --- */
+let verts = [];
+map.on('click', e => {
+  if(state.tool === 'point'){ add('point', [e.latlng]); return; }
+  if(state.tool === 'erase'){
+    const hit = hitTest(map.latLngToContainerPoint(e.latlng));
+    if(hit){ remove(hit); if(navigator.vibrate) navigator.vibrate(8); }
+    else toast('Nothing there — tap closer to a mark.');
+    return;
+  }
+  if(state.tool === 'line' || state.tool === 'polygon'){
+    verts.push(e.latlng);
+    drawDraft();
+    $('#pending').classList.add('on');
+  }
+});
+let draftDots = [];
+function drawDraft(){
+  if(draft){ map.removeLayer(draft); draft = null; }
+  draftDots.forEach(d => map.removeLayer(d));
+  const style = { color:state.color, weight:state.weight, dashArray:'1 7', lineCap:'round', interactive:false };
+  if(state.tool === 'polygon' && verts.length > 2)
+    draft = L.polygon(verts, { ...style, fillColor:state.color, fillOpacity:.12 }).addTo(map);
+  else if(verts.length > 1)
+    draft = L.polyline(verts, style).addTo(map);
+  draftDots = verts.map(v => L.circleMarker(v, {
+    radius:4, color:'#fff', weight:2, fillColor:state.color, fillOpacity:1, interactive:false
+  }).addTo(map));
+  showMeasure(state.tool === 'polygon' && verts.length > 2
+    ? verts.length + ' pts · ' + fmtArea(areaOf(verts))
+    : verts.length + ' pts · ' + fmtLen(lengthOf(verts)));
+}
+function cancelDraft(){
+  verts = [];
+  if(draft){ map.removeLayer(draft); draft = null; }
+  draftDots.forEach(d => map.removeLayer(d)); draftDots = [];
+  $('#pending').classList.remove('on');
+  showMeasure('');
+}
+$('#pCancel').addEventListener('click', cancelDraft);
+$('#pBack').addEventListener('click', () => { verts.pop(); verts.length ? drawDraft() : cancelDraft(); });
+$('#pDone').addEventListener('click', () => {
+  const need = state.tool === 'polygon' ? 3 : 2;
+  if(verts.length < need) return toast('Tap at least ' + need + ' points first.');
+  add(state.tool, verts);
+  cancelDraft();
+});
+
+/* --- erase hit test, in screen pixels so fingers work --- */
+function hitTest(pt, tol = 20){
+  for(let i = features.length - 1; i >= 0; i--){
+    const f = features[i], ps = f.pts.map(p => map.latLngToContainerPoint(p));
+    if(f.kind === 'point'){ if(ps[0].distanceTo(pt) <= tol) return f; continue; }
+    for(let j = 0; j < ps.length - 1; j++)
+      if(L.LineUtil.pointToSegmentDistance(pt, ps[j], ps[j+1]) <= tol) return f;
+    if(f.kind === 'polygon' && ps.length > 2 &&
+       L.LineUtil.pointToSegmentDistance(pt, ps[ps.length-1], ps[0]) <= tol) return f;
+  }
+  return null;
+}
+
+/* ============ aux buttons ============ */
+$('#bUndo').addEventListener('click', () => {
+  if(verts.length) return $('#pBack').click();
+  if(!features.length) return toast('Nothing to undo.');
+  remove(features[features.length - 1]);
+});
+$('#bLocate').addEventListener('click', () => {
+  if(!navigator.geolocation) return toast('This device can’t share a location.');
+  toast('Finding you…');
+  navigator.geolocation.getCurrentPosition(
+    p => map.setView([p.coords.latitude, p.coords.longitude], Math.max(map.getZoom(), 16)),
+    () => toast('Location unavailable. Allow it in Settings › Safari.'),
+    { enableHighAccuracy:true, timeout:10000 }
+  );
+});
+
+/* ============ settings sheet ============ */
+const sheet = $('#sheet');
+$('#bSettings').addEventListener('click', () => {
+  fillForm(); sheet.classList.add('on'); sheet.setAttribute('aria-hidden','false');
+});
+$('#bClose').addEventListener('click', () => {
+  sheet.classList.remove('on'); sheet.setAttribute('aria-hidden','true');
+});
+
+const presetBar = $('#presets');
+PRESETS.forEach(p => {
+  const b = document.createElement('button');
+  b.textContent = p.name;
+  b.addEventListener('click', () => { fillForm(p); applyBase({ ...p }); toast(p.name + ' loaded.'); });
+  presetBar.appendChild(b);
+});
+function markActivePreset(){
+  [...presetBar.children].forEach((b,i) => b.classList.toggle('on', PRESETS[i].url === state.base.url));
+}
+function fillForm(b){
+  b = b || state.base;
+  $('#fUrl').value = b.url; $('#fAttr').value = b.attribution || '';
+  $('#fSub').value = b.subdomains || 'abc'; $('#fMax').value = b.maxZoom || 19;
+  $('#stat').textContent = features.length
+    ? features.length + ' mark' + (features.length>1?'s':'') + ' saved on this device.'
+    : 'Nothing drawn yet.';
+}
+$('#bApply').addEventListener('click', () => {
+  const url = $('#fUrl').value.trim();
+  if(!/\{z\}/.test(url) || !/\{x\}/.test(url) || !/\{y\}/.test(url))
+    return toast('The URL needs {z}, {x} and {y} in it.');
+  applyBase({
+    name:'Custom', url,
+    attribution:$('#fAttr').value.trim(),
+    subdomains:$('#fSub').value.trim() || 'abc',
+    maxZoom:Number($('#fMax').value) || 19
+  });
+  toast('Base map updated.');
+});
+
+/* --- ink --- */
+const swBar = $('#swatches');
+COLORS.forEach(c => {
+  const b = document.createElement('button');
+  b.className = 'sw'; b.style.background = c; b.setAttribute('aria-label', 'Ink ' + c);
+  b.addEventListener('click', () => { state.color = c; store.set('color', c); paintSwatches(); });
+  swBar.appendChild(b);
+});
+const custom = document.createElement('input');
+custom.type = 'color'; custom.value = state.color;
+custom.addEventListener('input', () => { state.color = custom.value; store.set('color', custom.value); paintSwatches(); });
+swBar.appendChild(custom);
+function paintSwatches(){ [...swBar.querySelectorAll('.sw')].forEach((b,i) => b.classList.toggle('on', COLORS[i] === state.color)); }
+paintSwatches();
+
+const wSlider = $('#fWeight');
+wSlider.value = state.weight; $('#wVal').textContent = state.weight;
+wSlider.addEventListener('input', () => {
+  state.weight = +wSlider.value; $('#wVal').textContent = state.weight; store.set('weight', state.weight);
+});
+
+/* --- marks in and out --- */
+function toGeoJSON(){
+  return { type:'FeatureCollection', features: features.map(f => ({
+    type:'Feature',
+    properties:{ color:f.color, weight:f.weight },
+    geometry: f.kind === 'point'
+      ? { type:'Point', coordinates:[f.pts[0].lng, f.pts[0].lat] }
+      : f.kind === 'polygon'
+        ? { type:'Polygon', coordinates:[[...f.pts.map(p=>[p.lng,p.lat]), [f.pts[0].lng, f.pts[0].lat]]] }
+        : { type:'LineString', coordinates:f.pts.map(p=>[p.lng,p.lat]) }
+  })) };
+}
+$('#bCopy').addEventListener('click', async () => {
+  const txt = JSON.stringify(toGeoJSON(), null, 2);
+  try{ await navigator.clipboard.writeText(txt); toast('GeoJSON copied.'); }
+  catch(e){ $('#fImport').value = txt; toast('Copy blocked — it’s in the box below instead.'); }
+});
+$('#bDownload').addEventListener('click', () => {
+  const url = URL.createObjectURL(new Blob([JSON.stringify(toGeoJSON())], { type:'application/geo+json' }));
+  const a = document.createElement('a');
+  a.href = url; a.download = 'fieldmark-' + new Date().toISOString().slice(0,10) + '.geojson';
+  a.click(); setTimeout(() => URL.revokeObjectURL(url), 2000);
+});
+$('#bImport').addEventListener('click', () => {
+  let gj;
+  try{ gj = JSON.parse($('#fImport').value); }
+  catch(e){ return toast('That isn’t valid JSON.'); }
+  const list = gj.type === 'FeatureCollection' ? gj.features : [gj];
+  let n = 0;
+  list.forEach(ft => {
+    const g = ft.geometry || ft, p = ft.properties || {};
+    const c = p.color || state.color, w = p.weight || state.weight;
+    const push = (kind, pts) => { features.push({ id:uid(), kind, color:c, weight:w, pts }); n++; };
+    if(g.type === 'Point') push('point', [L.latLng(g.coordinates[1], g.coordinates[0])]);
+    if(g.type === 'LineString') push('line', g.coordinates.map(x => L.latLng(x[1], x[0])));
+    if(g.type === 'Polygon') push('polygon', g.coordinates[0].map(x => L.latLng(x[1], x[0])));
+  });
+  if(!n) return toast('No points, lines or areas found.');
+  features.forEach(render); save(); refresh(); fillForm();
+  const b = L.featureGroup(features.map(f => f.layer)).getBounds();
+  if(b.isValid()) map.fitBounds(b, { padding:[40,40] });
+  toast('Loaded ' + n + ' mark' + (n>1?'s':'') + '.');
+});
+$('#bClear').addEventListener('click', () => {
+  if(!features.length) return toast('Already empty.');
+  if(!confirm('Erase all ' + features.length + ' marks? This can’t be undone.')) return;
+  features.forEach(f => map.removeLayer(f.layer));
+  features = []; save(); refresh(); fillForm(); toast('All marks erased.');
+});
+
+/* ============ toast ============ */
+let toastTimer;
+function toast(msg){
+  const t = $('#toast');
+  t.textContent = msg; t.classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('on'), 2600);
+}
+
+/* ============ service worker ============ */
+if('serviceWorker' in navigator)
+  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(()=>{}));
+
+refresh();
+setTimeout(() => map.invalidateSize(), 300);
+window.addEventListener('resize', () => map.invalidateSize());
+</script>
+</body>
+</html>
