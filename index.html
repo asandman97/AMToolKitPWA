@@ -279,6 +279,15 @@ input[type=color]{width:38px;height:38px;padding:0;border:2px solid var(--edge);
 </section>
 
 <script>
+/* Phones have no console, so put script errors on screen where you can read them. */
+window.addEventListener('error', e => {
+  const t = document.getElementById('toast');
+  if(!t) return;
+  t.textContent = (e.message || 'Script error') + (e.lineno ? '  ·  line ' + e.lineno : '');
+  t.style.borderColor = '#FF6B6B'; t.style.color = '#FF6B6B';
+  t.classList.add('on');
+});
+
 /* ============ storage that degrades quietly ============ */
 const mem = {};
 const store = {
@@ -546,7 +555,9 @@ PRESETS.forEach(p => {
   presetBar.appendChild(b);
 });
 function markActivePreset(){
-  [...presetBar.children].forEach((b,i) => b.classList.toggle('on', PRESETS[i].url === state.base.url));
+  const bar = document.querySelector('#presets');
+  if(!bar) return;
+  [...bar.children].forEach((b,i) => b.classList.toggle('on', PRESETS[i].url === state.base.url));
 }
 function fillForm(b){
   b = b || state.base;
