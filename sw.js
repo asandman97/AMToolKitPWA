@@ -1,6 +1,6 @@
 /* Fieldmark service worker.
    Bump VERSION whenever you change index.html, or phones keep serving the old copy. */
-const VERSION = 'v4';
+const VERSION = 'v5';
 const SHELL = 'fieldmark-shell-' + VERSION;
 const RUNTIME = 'fieldmark-runtime-' + VERSION;
 const TILES = 'fieldmark-tiles';          /* not versioned: saved tiles survive updates */
