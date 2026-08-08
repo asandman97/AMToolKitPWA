@@ -11,7 +11,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Fieldmark">
-<link rel="apple-touch-icon" href="./IMAGE_1431.png">
+<link rel="apple-touch-icon" href="./icon-192.png">
 
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -1111,8 +1111,11 @@ function tileUrl(x, y, z){
     .replace('{z}', z).replace('{x}', x).replace('{y}', y).replace('{r}', '');
 }
 function tileList(depth){
-  var b = map.getBounds(), z0 = Math.round(map.getZoom()), out = [];
-  var maxZ = Math.min(z0 + depth, nativeMax(state.base));
+  /* clamp to the native limit: an overzoomed view is drawn from native tiles,
+     so starting above it would collect nothing at all */
+  var top = nativeMax(state.base);
+  var b = map.getBounds(), z0 = Math.min(Math.round(map.getZoom()), top), out = [];
+  var maxZ = Math.min(z0 + depth, top);
   var yOf = function(lat, n){
     var r = lat * D2R;
     return Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n);
@@ -1295,6 +1298,25 @@ function applyScale(){
   if(el) document.getElementById('scaleHost').appendChild(el);
 }
 
+/* ==================== renderer drift fix ====================
+   leaflet-rotate replaces L.Renderer._updateTransform with an approximation and
+   flags it in its own source: "@FIXME layer drifts on map.setZoom()". It takes
+   that path whenever rotate:true is set, even at bearing 0, so drawn marks lag
+   behind the imagery through a pinch and only snap into place when you let go.
+
+   Rather than patch that transform, throw it away every zoom frame and
+   re-project the paths from their latlngs, which is what Leaflet does anyway
+   when a gesture ends. Costs a little more per frame, but it is always exact. */
+function renderers(){
+  var out = [];
+  if(map._renderer) out.push(map._renderer);
+  for(var k in map._paneRenderers) if(map._paneRenderers[k]) out.push(map._paneRenderers[k]);
+  return out;
+}
+function reprojectVectors(){
+  renderers().forEach(function(r){ if(r._reset) r._reset(); });
+}
+
 /* ==================== rotation ==================== */
 function viewBearing(){
   return map.getBearing ? ((map.getBearing() % 360) + 360) % 360 : 0;
@@ -1302,6 +1324,10 @@ function viewBearing(){
 function setBearing(deg){
   if(!map.setBearing) return;
   map.setBearing(((deg % 360) + 360) % 360);
+  /* animated zoom interpolates a transform we can't trust once rotated,
+     so trade the animation for marks that stay glued to the imagery */
+  map.options.zoomAnimation = !map.getBearing();
+  reprojectVectors();
   updateCompass();
 }
 function updateCompass(){
@@ -1542,6 +1568,7 @@ function wire(){
 
   map.on('move zoom', refresh);
   map.on('rotate rotateend', updateCompass);
+  map.on('zoom', reprojectVectors);
   map.on('moveend zoomend', function(){
     var c = map.getCenter();
     sSet('view', { lat:c.lat, lng:c.lng, zoom:map.getZoom() });
@@ -1797,6 +1824,7 @@ function init(){
   fillSettings();
   fillGridForm();
   buildPending();
+  map.options.zoomAnimation = !viewBearing();
   updateCompass();
   refresh();
 
