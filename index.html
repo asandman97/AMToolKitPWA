@@ -1,0 +1,1061 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>OLS Plotter — obstacle limitation surfaces over imagery</title>
+<meta name="description" content="Draw ICAO Annex 14, Amendment 18 and FAA Part 77 obstacle limitation surfaces over satellite imagery for multi-runway aerodromes.">
+<meta name="theme-color" content="#141A1D">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Barlow:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.css" rel="stylesheet">
+<style>
+:root{
+  --paper:#F2F1EC; --paper2:#E6E4DB; --paper3:#DAD7CB;
+  --ink:#141A1D; --ink2:#5C6469; --ink3:#8A9298;
+  --rule:#CCC8BA; --asphalt:#1E2427;
+  --magenta:#C8006B; --blue:#2B5CA8; --amber:#A96400; --red:#B3261E; --green:#2E6B34;
+  --sidebar:352px;
+  --mono:"IBM Plex Mono",ui-monospace,monospace;
+  --cond:"Barlow Condensed",system-ui,sans-serif;
+  --body:"Barlow",system-ui,sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;overflow:hidden;background:var(--asphalt);
+  font-family:var(--body);color:var(--ink);-webkit-text-size-adjust:100%}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--magenta);outline-offset:1px}
+
+#app{display:flex;height:100%;width:100%}
+#map{flex:1;height:100%;background:#0d1214}
+.maplibregl-ctrl-attrib{font-family:var(--body);font-size:10px}
+
+/* ---------- sidebar ---------- */
+#panel{width:var(--sidebar);flex:0 0 var(--sidebar);height:100%;background:var(--paper);
+  display:flex;flex-direction:column;border-right:1px solid var(--rule);z-index:5;
+  box-shadow:2px 0 18px rgba(0,0,0,.45)}
+#brand{padding:14px 16px 10px;border-bottom:1px solid var(--rule);background:var(--asphalt);color:var(--paper)}
+#brand h1{margin:0;font-family:var(--cond);font-weight:700;font-size:26px;letter-spacing:.06em;
+  text-transform:uppercase;line-height:1}
+#brand p{margin:4px 0 0;font-size:11.5px;letter-spacing:.13em;text-transform:uppercase;
+  font-family:var(--cond);color:#93A0A5}
+#brand .toggle{display:none}
+#brand .dash{display:inline-block;width:26px;height:3px;background:var(--magenta);
+  vertical-align:middle;margin-right:8px}
+
+nav#tabs{display:flex;border-bottom:1px solid var(--rule);background:var(--paper2)}
+nav#tabs button{flex:1;padding:9px 4px 8px;background:none;border:0;border-bottom:3px solid transparent;
+  font-family:var(--cond);font-size:13.5px;letter-spacing:.09em;text-transform:uppercase;
+  color:var(--ink2);cursor:pointer}
+nav#tabs button[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--magenta);background:var(--paper)}
+
+#scroller{flex:1;overflow-y:auto;overscroll-behavior:contain}
+section.tab{display:none;padding:14px 16px 40px}
+section.tab.on{display:block}
+
+.eyebrow{font-family:var(--cond);font-size:11.5px;letter-spacing:.16em;text-transform:uppercase;
+  color:var(--ink2);margin:18px 0 7px;display:flex;align-items:center;gap:8px}
+.eyebrow:first-child{margin-top:2px}
+.eyebrow::after{content:"";flex:1;height:1px;background:var(--rule)}
+
+label.f{display:block;margin:0 0 9px}
+label.f > span{display:block;font-family:var(--cond);font-size:11.5px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--ink2);margin-bottom:2px}
+input[type=text],input[type=number],select{width:100%;padding:6px 8px;background:#fff;
+  border:1px solid var(--rule);border-radius:2px;font-family:var(--mono);font-size:12.5px}
+input[type=number]{text-align:right;font-variant-numeric:tabular-nums}
+.row{display:flex;gap:8px}.row>*{flex:1;min-width:0}
+
+button.act{padding:7px 11px;background:var(--ink);color:var(--paper);border:0;border-radius:2px;
+  font-family:var(--cond);font-size:13px;letter-spacing:.09em;text-transform:uppercase;cursor:pointer}
+button.act.ghost{background:none;color:var(--ink);border:1px solid var(--rule)}
+button.act.warn{background:var(--red)}
+button.act.pick{background:var(--magenta)}
+button.act.pick[aria-pressed="true"]{background:var(--amber)}
+button.act:disabled{opacity:.4;cursor:not-allowed}
+.btnrow{display:flex;gap:7px;flex-wrap:wrap;margin-top:8px}
+
+/* runway designator chips — painted-threshold treatment */
+.rwycard{border:1px solid var(--rule);border-radius:3px;background:#fff;margin-bottom:10px;overflow:hidden}
+.rwycard > header{display:flex;align-items:stretch;gap:0;background:var(--asphalt);cursor:pointer}
+.desig{font-family:var(--cond);font-weight:700;font-size:23px;letter-spacing:.05em;color:#fff;
+  padding:8px 11px 6px;line-height:1;-webkit-text-stroke:.5px rgba(255,255,255,.55)}
+.desig small{display:block;font-size:10px;letter-spacing:.14em;color:#93A0A5;-webkit-text-stroke:0;
+  font-weight:500;margin-top:3px}
+.rwycard > header .sep{width:1px;background:repeating-linear-gradient(to bottom,#fff 0 7px,transparent 7px 14px);
+  margin:9px 0;opacity:.5}
+.rwycard > header .grow{flex:1}
+.rwycard > header .meta{align-self:center;padding-right:11px;font-family:var(--mono);font-size:10.5px;color:#93A0A5;text-align:right}
+.rwybody{padding:11px 12px 13px;display:none}
+.rwycard.open .rwybody{display:block}
+.endblk{border-left:3px solid var(--magenta);padding-left:9px;margin-bottom:12px}
+.endblk h4{margin:0 0 7px;font-family:var(--cond);font-size:14px;letter-spacing:.1em;text-transform:uppercase}
+
+table.dims{width:100%;border-collapse:collapse;font-size:12px}
+table.dims th{text-align:left;font-family:var(--cond);font-weight:600;font-size:11.5px;letter-spacing:.06em;
+  text-transform:uppercase;color:var(--ink2);padding:5px 6px 4px;border-bottom:1px solid var(--rule)}
+table.dims td{padding:2px 4px;border-bottom:1px solid var(--paper2)}
+table.dims td.k{font-family:var(--cond);font-size:12.5px;letter-spacing:.03em;color:var(--ink)}
+table.dims td.u{font-family:var(--mono);font-size:10.5px;color:var(--ink3);width:34px}
+table.dims input{padding:3px 5px;font-size:11.5px;width:74px}
+tr.na td{opacity:.35}
+
+.legend{display:grid;grid-template-columns:auto 1fr auto;gap:4px 9px;align-items:center;font-size:12.5px}
+.legend .sw{width:15px;height:15px;border-radius:2px;border:1.5px solid}
+.legend label{display:contents;cursor:pointer}
+.legend input{margin:0;accent-color:var(--magenta)}
+
+.note{font-size:12px;line-height:1.45;color:var(--ink2);margin:8px 0 0}
+.note code{font-family:var(--mono);font-size:11px;background:var(--paper2);padding:1px 3px}
+.warnbox{border-left:3px solid var(--amber);background:#FBF6EC;padding:8px 10px;font-size:12px;
+  line-height:1.45;margin:10px 0}
+
+/* ---------- readout ---------- */
+#readout{position:absolute;right:12px;bottom:12px;width:296px;max-width:calc(100vw - 24px);
+  background:rgba(20,26,29,.93);color:#E8ECEA;border:1px solid #3A464B;border-radius:3px;
+  backdrop-filter:blur(7px);z-index:4;font-size:12px;display:none}
+#readout.on{display:block}
+#readout header{padding:8px 11px 6px;border-bottom:1px solid #3A464B;display:flex;justify-content:space-between;
+  align-items:baseline;font-family:var(--cond);letter-spacing:.13em;text-transform:uppercase;font-size:11.5px;color:#93A0A5}
+#readout header button{background:none;border:0;color:#93A0A5;cursor:pointer;font-size:15px;line-height:1;padding:0 2px}
+#gov{padding:9px 11px;display:flex;align-items:flex-end;gap:10px;border-bottom:1px solid #2A353A}
+#gov .val{font-family:var(--mono);font-weight:600;font-size:29px;line-height:.95;letter-spacing:-.02em}
+#gov .lbl{font-family:var(--cond);font-size:12px;letter-spacing:.09em;text-transform:uppercase;color:#93A0A5;padding-bottom:3px}
+#stack{max-height:172px;overflow:auto;padding:5px 0}
+#stack .r{display:grid;grid-template-columns:11px 1fr auto;gap:7px;align-items:center;padding:3px 11px;
+  font-family:var(--mono);font-size:11px}
+#stack .r .bar{width:11px;height:11px;border-radius:2px}
+#stack .r.win{background:rgba(200,0,107,.22)}
+#stack .r .nm{font-family:var(--body);font-size:11.5px;color:#C5CDD0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#obst{border-top:1px solid #3A464B;padding:8px 11px;display:flex;gap:7px;align-items:center}
+#obst input{flex:1;background:#0E1416;border:1px solid #3A464B;color:#E8ECEA;padding:4px 6px;font-family:var(--mono);font-size:12px}
+#verdict{font-family:var(--cond);letter-spacing:.04em;font-size:13.5px;white-space:nowrap;font-weight:600}
+#verdict.clear{color:#6BD98A}#verdict.pen{color:#FF7A8A}
+
+#hint{position:absolute;left:50%;transform:translateX(-50%);top:12px;z-index:4;
+  background:var(--magenta);color:#fff;padding:6px 14px;border-radius:2px;
+  font-family:var(--cond);letter-spacing:.1em;text-transform:uppercase;font-size:13px;display:none}
+#hint.on{display:block}
+#sheetgrip{display:none}
+
+@media (max-width:860px){
+  #app{flex-direction:column-reverse}
+  #panel{width:100%;flex:0 0 auto;height:46vh;border-right:0;border-top:1px solid var(--rule);
+    box-shadow:0 -3px 20px rgba(0,0,0,.5);transition:height .22s ease}
+  #panel.min{height:52px}
+  #panel.max{height:88vh}
+  #sheetgrip{display:block;position:absolute;top:-1px;left:0;right:0;height:0}
+  #brand{padding:9px 14px 8px;display:flex!important;align-items:center;gap:10px;cursor:pointer}
+  #brand h1{font-size:19px}#brand p{display:none}
+  #brand .toggle{display:block}
+  #brand .toggle{margin-left:auto;font-family:var(--cond);font-size:12px;letter-spacing:.1em;color:#93A0A5}
+  #map{flex:1;min-height:0}
+  #readout{bottom:auto;top:52px;right:8px;width:262px}
+}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="panel">
+    <div id="brand"><div><h1><span class="dash"></span>OLS Plotter</h1>
+      <p>Obstacle limitation surfaces</p></div><span class="toggle">Hide</span></div>
+    <nav id="tabs" role="tablist">
+      <button role="tab" data-tab="rwy" aria-selected="true">Runways</button>
+      <button role="tab" data-tab="par" aria-selected="false">Parameters</button>
+      <button role="tab" data-tab="lay" aria-selected="false">Layers</button>
+      <button role="tab" data-tab="io"  aria-selected="false">Data</button>
+    </nav>
+    <div id="scroller">
+      <section class="tab on" id="tab-rwy"></section>
+      <section class="tab" id="tab-par"></section>
+      <section class="tab" id="tab-lay"></section>
+      <section class="tab" id="tab-io"></section>
+    </div>
+  </aside>
+  <div id="map"></div>
+  <div id="hint"></div>
+  <div id="readout">
+    <header><span>Governing surface</span><button id="rclose" aria-label="Close readout">&times;</button></header>
+    <div id="gov"><span class="val" id="govval">—</span><span class="lbl" id="govlbl">no surface</span></div>
+    <div id="stack"></div>
+    <div id="obst"><input id="obsth" type="number" placeholder="Object top (AMSL)" step="0.1">
+      <span id="verdict">—</span></div>
+  </div>
+</div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/maplibre-gl/4.7.1/maplibre-gl.min.js"></script>
+<script>
+"use strict";
+/* =========================================================================
+   1. RULESETS — dimension tables. All values in the ruleset's native unit;
+      `unit` gives the metre conversion factor applied at build time.
+      Sources: ICAO Annex 14 Vol I Tables 4-1/4-2 (current), Annex 14
+      Amendment 18 (applicable 21 Nov 2030), 14 CFR 77.19.
+   ========================================================================= */
+const FT = 0.3048;
+
+/* dimension keys used by the geometry engine (metres after scaling):
+   ihsH ihsR conS conH                      inner horizontal + conical
+   appW appD appDiv s1L s1S s2L s2S horL    approach surface
+   trS itS                                  transitional / inner transitional
+   iaW iaD iaL iaS                          inner approach
+   blW blD blDiv blS                        balked landing
+   tkW tkD tkDiv tkFW tkL tkS               take-off climb                     */
+
+const NULLD = {ihsH:0,ihsR:0,conS:0,conH:0,appW:0,appD:0,appDiv:0,s1L:0,s1S:0,s2L:0,s2S:0,horL:0,
+  trS:0,itS:0,iaW:0,iaD:0,iaL:0,iaS:0,blW:0,blD:0,blDiv:0,blS:0,tkW:0,tkD:0,tkDiv:0,tkFW:0,tkL:0,tkS:0};
+const D = o => Object.assign({}, NULLD, o);
+
+const RULESETS = {
+  icao: {
+    label:"ICAO Annex 14 (current)", unit:1, un:"m", codeLabel:"Code number",
+    codes:[["1","Code 1"],["2","Code 2"],["3","Code 3"],["4","Code 4"]],
+    types:[["ni","Non-instrument"],["np","Non-precision"],["p1","Precision CAT I"],["p23","Precision CAT II/III"]],
+    stripHalf:{ni:{1:30,2:40,3:75,4:75}, np:{1:75,2:75,3:150,4:150}, p1:{1:75,2:75,3:150,4:150}, p23:{1:75,2:75,3:150,4:150}},
+    stripEnd:{1:30,2:60,3:60,4:60},
+    key:(c,t)=> t==="ni" ? "ni"+c : t==="np" ? (c<="2"?"np12":"np"+c) : t==="p1" ? (c<="2"?"p112":"p134") : "p2334",
+    tkKey:c=> c<="2" ? "tk"+c : "tk34",
+    dims:{
+      ni1:  D({ihsH:45,ihsR:2000,conS:.05,conH:35, appW:60, appD:30,appDiv:.10,s1L:1600,s1S:.05,  trS:.20}),
+      ni2:  D({ihsH:45,ihsR:2500,conS:.05,conH:55, appW:80, appD:60,appDiv:.10,s1L:2500,s1S:.04,  trS:.20}),
+      ni3:  D({ihsH:45,ihsR:4000,conS:.05,conH:75, appW:150,appD:60,appDiv:.10,s1L:3000,s1S:.0333,trS:.143}),
+      ni4:  D({ihsH:45,ihsR:4000,conS:.05,conH:100,appW:150,appD:60,appDiv:.10,s1L:3000,s1S:.025, trS:.143}),
+      np12: D({ihsH:45,ihsR:3500,conS:.05,conH:60, appW:140,appD:60,appDiv:.15,s1L:2500,s1S:.0333,trS:.20}),
+      np3:  D({ihsH:45,ihsR:4000,conS:.05,conH:75, appW:280,appD:60,appDiv:.15,s1L:3000,s1S:.02,s2L:3600,s2S:.025,horL:8400,trS:.143}),
+      np4:  D({ihsH:45,ihsR:4000,conS:.05,conH:100,appW:280,appD:60,appDiv:.15,s1L:3000,s1S:.02,s2L:3600,s2S:.025,horL:8400,trS:.143}),
+      p112: D({ihsH:45,ihsR:3500,conS:.05,conH:60, appW:140,appD:60,appDiv:.15,s1L:3000,s1S:.025,s2L:12000,s2S:.03,horL:0,
+               trS:.143,itS:.40, iaW:90, iaD:60,iaL:900,iaS:.025, blW:90, blD:60,  blDiv:.10,blS:.04}),
+      p134: D({ihsH:45,ihsR:4000,conS:.05,conH:100,appW:280,appD:60,appDiv:.15,s1L:3000,s1S:.02, s2L:3600, s2S:.025,horL:8400,
+               trS:.143,itS:.333,iaW:120,iaD:60,iaL:900,iaS:.02,  blW:120,blD:1800,blDiv:.10,blS:.0333}),
+      p2334:D({ihsH:45,ihsR:4000,conS:.05,conH:100,appW:280,appD:60,appDiv:.15,s1L:3000,s1S:.02, s2L:3600, s2S:.025,horL:8400,
+               trS:.143,itS:.333,iaW:120,iaD:60,iaL:900,iaS:.02,  blW:120,blD:1800,blDiv:.10,blS:.0333}),
+      tk1:  D({tkW:60, tkD:30,tkDiv:.10, tkFW:380, tkL:1600, tkS:.05}),
+      tk2:  D({tkW:80, tkD:60,tkDiv:.10, tkFW:580, tkL:2500, tkS:.04}),
+      tk34: D({tkW:180,tkD:60,tkDiv:.125,tkFW:1800,tkL:15000,tkS:.02})
+    }
+  },
+
+  icao18: {
+    label:"ICAO Annex 14 Amd 18 (from 2030)", unit:1, un:"m", preview:true, codeLabel:"Design group",
+    codes:[["I","ADG I"],["IIA","ADG IIA"],["IIB","ADG IIB"],["IIC","ADG IIC"],["III","ADG III"],["IV","ADG IV"],["V","ADG V"]],
+    types:[["ni","Non-instrument"],["ins","Instrument (non-prec)"],["p1","Precision"]],
+    stripHalf:{ni:{I:30,IIA:40,IIB:40,IIC:75,III:75,IV:75,V:75},
+               ins:{I:75,IIA:75,IIB:75,IIC:150,III:150,IV:150,V:150},
+               p1:{I:75,IIA:75,IIB:75,IIC:150,III:150,IV:150,V:150}},
+    stripEnd:{I:30,IIA:60,IIB:60,IIC:60,III:60,IV:60,V:60},
+    key:(c,t)=>{
+      const g = (c==="I"||c==="IIA") ? "a" : (c==="IIB") ? "b" : "c";
+      return t+"_"+g;
+    },
+    tkKey:c=> (c==="I"||c==="IIA") ? "tkS_a" : (c==="IIB") ? "tkS_b" : "tkL_c",
+    dims:{
+      ni_a: D({ihsH:45,ihsR:3350, conS:.05,conH:35, appW:60, appD:30,appDiv:.10,s1L:1600,s1S:.05,  trS:.20}),
+      ni_b: D({ihsH:60,ihsR:5350, conS:.05,conH:55, appW:110,appD:60,appDiv:.10,s1L:2500,s1S:.04,  trS:.20}),
+      ni_c: D({ihsH:90,ihsR:10750,conS:.05,conH:75, appW:150,appD:60,appDiv:.10,s1L:2500,s1S:.0333,trS:.20}),
+      ins_a:D({ihsH:45,ihsR:3350, conS:.05,conH:35, appW:110,appD:60,appDiv:.10,s1L:4500,s1S:.0333,trS:.20,
+               iaW:60, iaD:60,iaL:900, iaS:.0333}),
+      ins_b:D({ihsH:60,ihsR:5350, conS:.05,conH:55, appW:150,appD:60,appDiv:.10,s1L:4500,s1S:.0333,trS:.20,
+               iaW:90, iaD:60,iaL:1200,iaS:.0333}),
+      ins_c:D({ihsH:90,ihsR:10750,conS:.05,conH:90, appW:200,appD:60,appDiv:.10,s1L:4500,s1S:.0333,trS:.20,
+               iaW:120,iaD:60,iaL:1350,iaS:.0333}),
+      p1_a: D({ihsH:45,ihsR:3350, conS:.05,conH:35, appW:110,appD:60,appDiv:.10,s1L:4500,s1S:.0333,trS:.20,itS:.40,
+               iaW:60, iaD:60,iaL:900, iaS:.0333, blW:90, blD:900,blDiv:.10,blS:.05}),
+      p1_b: D({ihsH:60,ihsR:5350, conS:.05,conH:55, appW:150,appD:60,appDiv:.10,s1L:4500,s1S:.0333,trS:.20,itS:.40,
+               iaW:90, iaD:60,iaL:1200,iaS:.0333, blW:90, blD:900,blDiv:.10,blS:.04}),
+      p1_c: D({ihsH:90,ihsR:10750,conS:.05,conH:90, appW:200,appD:60,appDiv:.10,s1L:4500,s1S:.0333,trS:.20,itS:.333,
+               iaW:120,iaD:60,iaL:1350,iaS:.0333, blW:120,blD:900,blDiv:.10,blS:.0333}),
+      tkS_a:D({tkW:60, tkD:30,tkDiv:.10, tkFW:380, tkL:1600, tkS:.05}),
+      tkS_b:D({tkW:80, tkD:60,tkDiv:.10, tkFW:580, tkL:2500, tkS:.04}),
+      tkL_c:D({tkW:180,tkD:60,tkDiv:.125,tkFW:1800,tkL:10000,tkS:.02})
+    }
+  },
+
+  far77: {
+    label:"FAA 14 CFR Part 77", unit:FT, un:"ft", codeLabel:"Runway class",
+    codes:[["u","Utility"],["nu","Other than utility"]],
+    types:[["v","Visual"],["np","Non-precision, vis \u2265 3/4 mi"],["npl","Non-precision, vis < 3/4 mi"],["p","Precision instrument"]],
+    stripHalf:{v:{u:125,nu:250}, np:{u:250,nu:250}, npl:{u:500,nu:500}, p:{u:500,nu:500}},
+    stripEnd:{u:200,nu:200},
+    key:(c,t)=> t==="v" ? (c==="u"?"v_u":"v_n") : t==="np" ? (c==="u"?"np_u":"np_n") : t==="npl" ? "npl" : "prec",
+    tkKey:c=>"none",
+    dims:{
+      v_u:  D({ihsH:150,ihsR:5000, conS:.05,conH:200,appW:250, appD:200,appDiv:.10, s1L:5000, s1S:.05,   trS:.1429}),
+      v_n:  D({ihsH:150,ihsR:10000,conS:.05,conH:200,appW:500, appD:200,appDiv:.10, s1L:5000, s1S:.05,   trS:.1429}),
+      np_u: D({ihsH:150,ihsR:5000, conS:.05,conH:200,appW:500, appD:200,appDiv:.15, s1L:5000, s1S:.05,   trS:.1429}),
+      np_n: D({ihsH:150,ihsR:10000,conS:.05,conH:200,appW:500, appD:200,appDiv:.15, s1L:10000,s1S:.0294, trS:.1429}),
+      npl:  D({ihsH:150,ihsR:10000,conS:.05,conH:200,appW:1000,appD:200,appDiv:.15, s1L:10000,s1S:.0294, trS:.1429}),
+      prec: D({ihsH:150,ihsR:10000,conS:.05,conH:200,appW:1000,appD:200,appDiv:.15, s1L:10000,s1S:.02,
+               s2L:40000,s2S:.025, trS:.1429}),
+      none: D({})
+    }
+  }
+};
+
+/* colours: aeronautical-chart derived, tuned for legibility on dark imagery */
+const SURF = {
+  strip:{c:"#FFFFFF", n:"Runway strip"},
+  app:  {c:"#E5007D", n:"Approach"},
+  ia:   {c:"#FF6FC0", n:"Inner approach"},
+  tr:   {c:"#FFB000", n:"Transitional"},
+  it:   {c:"#FF6A1F", n:"Inner transitional"},
+  bl:   {c:"#00C7A9", n:"Balked landing"},
+  tk:   {c:"#4C8DFF", n:"Take-off climb"},
+  ihs:  {c:"#9CE86A", n:"Inner horizontal"},
+  con:  {c:"#EDE45C", n:"Conical"}
+};
+const ORDER = ["con","ihs","tk","app","tr","bl","it","ia","strip"];
+
+/* ---------------- state ---------------- */
+const state = {
+  ruleset:"icao",
+  datumMode:"lowestThr",     // lowestThr | arpElev
+  arpElev:0,
+  overrides:{},              // {ruleset: {catKey: {field:value}}}
+  runways:[],
+  visible:Object.fromEntries(ORDER.map(k=>[k,true])),
+  probe:null,
+  obstacleH:null
+};
+
+function newRunway(o){
+  return Object.assign({
+    id:"R"+Math.random().toString(36).slice(2,7),
+    name:"09/27",
+    a:{lat:0,lon:0}, b:{lat:0,lon:0},
+    stripHalf:null, stripEnd:null,
+    ends:[
+      {desig:"09", code:"4", type:"p1", thrElev:0, disp:0, clearway:0, tkCode:"4"},
+      {desig:"27", code:"4", type:"np", thrElev:0, disp:0, clearway:0, tkCode:"4"}
+    ]
+  }, o||{});
+}
+
+/* demo: two parallel runways, approximate coordinates — replace with survey data */
+state.runways = [
+  newRunway({name:"10L/28R", a:{lat:53.42852,lon:-6.27548}, b:{lat:53.42470,lon:-6.21826},
+    ends:[{desig:"10L",code:"4",type:"p1",thrElev:73,disp:0,clearway:0,tkCode:"4"},
+          {desig:"28R",code:"4",type:"p1",thrElev:70,disp:0,clearway:0,tkCode:"4"}]}),
+  newRunway({name:"10R/28L", a:{lat:53.41870,lon:-6.28372}, b:{lat:53.41488,lon:-6.22650},
+    ends:[{desig:"10R",code:"4",type:"np",thrElev:72,disp:0,clearway:0,tkCode:"4"},
+          {desig:"28L",code:"4",type:"p1",thrElev:69,disp:0,clearway:0,tkCode:"4"}]})
+];
+
+/* =========================================================================
+   2. GEOMETRY ENGINE
+   Local tangent-plane projection (metres) about an aerodrome reference point.
+   Every surface is reduced to planar facets: polygon in world XY + a plane
+   z = a*x + b*y + c. The governing height at any point is the MINIMUM over
+   all facets covering it (ICAO Doc 9137 Pt 6: the lower surface dominates).
+   ========================================================================= */
+const RAD = Math.PI/180;
+function mPerDeg(lat){const f=lat*RAD;return{
+  la:111132.92-559.82*Math.cos(2*f)+1.175*Math.cos(4*f)-0.0023*Math.cos(6*f),
+  lo:111412.84*Math.cos(f)-93.5*Math.cos(3*f)+0.118*Math.cos(5*f)};}
+let PROJ={lat0:0,lon0:0,la:111132,lo:111320};
+function setProj(lat,lon){const m=mPerDeg(lat);PROJ={lat0:lat,lon0:lon,la:m.la,lo:m.lo};}
+const toXY=(lat,lon)=>[(lon-PROJ.lon0)*PROJ.lo,(lat-PROJ.lat0)*PROJ.la];
+const toLL=(x,y)=>[PROJ.lon0+x/PROJ.lo, PROJ.lat0+y/PROJ.la];
+
+const sub=(a,b)=>[a[0]-b[0],a[1]-b[1]];
+const add=(a,b)=>[a[0]+b[0],a[1]+b[1]];
+const mul=(a,k)=>[a[0]*k,a[1]*k];
+const dot=(a,b)=>a[0]*b[0]+a[1]*b[1];
+const len=a=>Math.hypot(a[0],a[1]);
+const norm=a=>{const l=len(a)||1;return[a[0]/l,a[1]/l];};
+const perp=a=>[-a[1],a[0]];
+
+function hull(pts){
+  const p=pts.slice().sort((u,v)=>u[0]-v[0]||u[1]-v[1]);
+  if(p.length<3)return p;
+  const cr=(o,a,b)=>(a[0]-o[0])*(b[1]-o[1])-(a[1]-o[1])*(b[0]-o[0]);
+  const lo=[],up=[];
+  for(const q of p){while(lo.length>=2&&cr(lo[lo.length-2],lo[lo.length-1],q)<=0)lo.pop();lo.push(q);}
+  for(let i=p.length-1;i>=0;i--){const q=p[i];
+    while(up.length>=2&&cr(up[up.length-2],up[up.length-1],q)<=0)up.pop();up.push(q);}
+  lo.pop();up.pop();return lo.concat(up);
+}
+function inPoly(pt,poly){
+  let c=false;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const xi=poly[i][0],yi=poly[i][1],xj=poly[j][0],yj=poly[j][1];
+    if(((yi>pt[1])!==(yj>pt[1]))&&(pt[0]<(xj-xi)*(pt[1]-yi)/((yj-yi)||1e-12)+xi))c=!c;
+  }
+  return c;
+}
+function distToPoly(pt,poly){
+  let d=Infinity;
+  for(let i=0,j=poly.length-1;i<poly.length;j=i++){
+    const a=poly[j],b=poly[i],ab=sub(b,a),ap=sub(pt,a);
+    const t=Math.max(0,Math.min(1,dot(ap,ab)/(dot(ab,ab)||1e-12)));
+    d=Math.min(d,len(sub(pt,add(a,mul(ab,t)))));
+  }
+  return d;
+}
+function circlePts(c,r,n){const o=[];for(let i=0;i<n;i++){const a=2*Math.PI*i/n;
+  o.push([c[0]+r*Math.cos(a),c[1]+r*Math.sin(a)]);}return o;}
+
+/* dimension lookup with per-category user overrides, scaled to metres */
+function dimsFor(end,isTakeoff){
+  const rs=RULESETS[state.ruleset];
+  const cat=isTakeoff?rs.tkKey(end.tkCode||end.code):rs.key(end.code,end.type);
+  const base=rs.dims[cat]||NULLD;
+  const ov=(state.overrides[state.ruleset]||{})[cat]||{};
+  const out={};
+  for(const k in base){
+    const v=(k in ov)?ov[k]:base[k];
+    out[k]=/S$|Div$/.test(k)?v:v*rs.unit;   // slopes & divergences are ratios
+  }
+  out.__cat=cat;
+  return out;
+}
+function catOf(end,isTakeoff){const rs=RULESETS[state.ruleset];
+  return isTakeoff?rs.tkKey(end.tkCode||end.code):rs.key(end.code,end.type);}
+function stripDims(rw){
+  const rs=RULESETS[state.ruleset], e=rw.ends[0];
+  const sh=(rs.stripHalf[e.type]||{})[e.code];
+  const se=rs.stripEnd[e.code]!==undefined?rs.stripEnd[e.code]:60;
+  return {half:(rw.stripHalf!=null?rw.stripHalf:(sh||75))*rs.unit,
+          endx:(rw.stripEnd!=null?rw.stripEnd:se)*rs.unit};
+}
+
+function facet(type,label,O,ex,ey,polyL,A,B,C,extra){
+  const poly=polyL.map(([s,t])=>[O[0]+s*ex[0]+t*ey[0], O[1]+s*ex[1]+t*ey[1]]);
+  const a=A*ex[0]+B*ey[0], b=A*ex[1]+B*ey[1];
+  const c=C-O[0]*a-O[1]*b;
+  const zs=poly.map(p=>a*p[0]+b*p[1]+c);
+  return Object.assign({type,label,poly,a,b,c,
+    zmin:Math.min(...zs),zmax:Math.max(...zs)},extra||{});
+}
+
+function buildScene(){
+  const rws=state.runways.filter(r=>r.a.lat||r.a.lon);
+  if(!rws.length)return null;
+  let sla=0,slo=0,n=0;
+  rws.forEach(r=>{sla+=r.a.lat+r.b.lat;slo+=r.a.lon+r.b.lon;n+=2;});
+  setProj(sla/n,slo/n);
+
+  const facets=[], warn=[];
+  let ihsH=0, conH=0, conS=.05, thrMin=Infinity;
+  const circles=[];
+
+  rws.forEach(rw=>{
+    rw.ends.forEach(e=>{
+      const d=dimsFor(e,false);
+      ihsH=Math.max(ihsH,d.ihsH);
+      if(d.conH>conH){conH=d.conH;conS=d.conS||.05;}
+      thrMin=Math.min(thrMin,e.thrElev);
+    });
+  });
+  const datum = state.datumMode==="arpElev" ? state.arpElev : (isFinite(thrMin)?thrMin:0);
+  const ihsZ = datum + ihsH;
+
+  rws.forEach(rw=>{
+    const A=toXY(rw.a.lat,rw.a.lon), B=toXY(rw.b.lat,rw.b.lon);
+    const L=len(sub(B,A)); if(L<50){warn.push(rw.name+": runway shorter than 50 m");return;}
+    const u=norm(sub(B,A)), p=perp(u);
+    const sd=stripDims(rw);
+    const d0=dimsFor(rw.ends[0],false), d1=dimsFor(rw.ends[1],false);
+    const disp0=(rw.ends[0].disp||0), disp1=(rw.ends[1].disp||0);
+    const uThr0=disp0, uThr1=L-disp1;
+    const z0=rw.ends[0].thrElev, z1=rw.ends[1].thrElev;
+    const zc=uu=>{ if(uThr1-uThr0<1)return z0;
+      const t=Math.max(0,Math.min(1,(uu-uThr0)/(uThr1-uThr0))); return z0+(z1-z0)*t; };
+
+    /* inner horizontal circle centres: extended centreline x strip ends */
+    const R=Math.max(d0.ihsR,d1.ihsR);
+    if(R>0){ circles.push({c:add(A,mul(u,-sd.endx)),r:R}); circles.push({c:add(A,mul(u,L+sd.endx)),r:R}); }
+
+    /* --- runway strip (reference only) --- */
+    facets.push(facet("strip",rw.name+" strip",A,u,p,
+      [[-sd.endx,sd.half],[L+sd.endx,sd.half],[L+sd.endx,-sd.half],[-sd.endx,-sd.half]],
+      0,0,Math.max(z0,z1),{rwy:rw.name,ref:true}));
+
+    /* ---- per-end surfaces in the end frame (origin = threshold, +s outward) ---- */
+    const endGeom=[0,1].map(i=>{
+      const e=rw.ends[i], d=i?d1:d0;
+      const O=i?add(A,mul(u,uThr1)):add(A,mul(u,uThr0));
+      const ex=i?u:mul(u,-1), ey=p;
+      const tag=e.desig||(i?"B":"A");
+      const secs=[{L:d.s1L,S:d.s1S},{L:d.s2L,S:d.s2S},{L:d.horL,S:0}].filter(s=>s.L>0);
+      const zThr=e.thrElev;
+      /* approach surface height as a function of s */
+      const appZ=s=>{ let ss=d.appD,z=zThr;
+        for(const sec of secs){ if(s<=ss+sec.L) return z+sec.S*(s-ss); z+=sec.S*sec.L; ss+=sec.L; }
+        return z; };
+      const appTot=secs.reduce((t,s)=>t+s.L,0);
+      const appHalf=s=>d.appW/2+d.appDiv*(s-d.appD);
+
+      /* approach facets */
+      if(d.appW>0&&secs.length){
+        let ss=d.appD, z=zThr;
+        secs.forEach((sec,k)=>{
+          const s2=ss+sec.L, h1=appHalf(ss), h2=appHalf(s2), z2=z+sec.S*sec.L;
+          facets.push(facet("app",tag+" approach \u00a7"+(k+1),O,ex,ey,
+            [[ss,h1],[s2,h2],[s2,-h2],[ss,-h1]], sec.S,0, z-sec.S*ss,
+            {rwy:rw.name,end:tag,slope:sec.S}));
+          ss=s2; z=z2;
+        });
+      }
+      /* inner approach */
+      if(d.iaW>0&&d.iaL>0){
+        facets.push(facet("ia",tag+" inner approach",O,ex,ey,
+          [[d.iaD,d.iaW/2],[d.iaD+d.iaL,d.iaW/2],[d.iaD+d.iaL,-d.iaW/2],[d.iaD,-d.iaW/2]],
+          d.iaS,0, zThr-d.iaS*d.iaD, {rwy:rw.name,end:tag}));
+      }
+      /* balked landing (extends inward from a point after the threshold) */
+      if(d.blW>0&&d.blS>0){
+        const uIn=i?(uThr1-d.blD):(uThr0+d.blD);
+        const zb=zc(uIn), q=(ihsZ-zb)/d.blS;
+        if(q>0){
+          const h1=d.blW/2, h2=d.blW/2+d.blDiv*q;
+          facets.push(facet("bl",tag+" balked landing",O,ex,ey,
+            [[-d.blD,h1],[-d.blD-q,h2],[-d.blD-q,-h2],[-d.blD,-h1]],
+            -d.blS,0, zb-d.blS*d.blD, {rwy:rw.name,end:tag,slope:d.blS}));
+        }
+      }
+      /* take-off climb (from the runway end / clearway, over the same end) */
+      const dt=dimsFor(rw.ends[i],true);
+      if(dt.tkW>0&&dt.tkL>0){
+        const disp=i?disp1:disp0;
+        const s0=disp+Math.max(dt.tkD,(rw.ends[i].clearway||0)*RULESETS[state.ruleset].unit);
+        const zT=zc(i?L:0);
+        const flare=(dt.tkFW-dt.tkW)/2/dt.tkDiv;
+        const pts=[], back=[];
+        const wAt=s=>Math.min(dt.tkFW/2, dt.tkW/2+dt.tkDiv*(s-s0));
+        const stops=[s0]; if(flare<dt.tkL)stops.push(s0+flare); stops.push(s0+dt.tkL);
+        for(let k=0;k<stops.length-1;k++){
+          const sa=stops[k],sb=stops[k+1];
+          facets.push(facet("tk",tag+" take-off climb",O,ex,ey,
+            [[sa,wAt(sa)],[sb,wAt(sb)],[sb,-wAt(sb)],[sa,-wAt(sa)]],
+            dt.tkS,0, zT-dt.tkS*s0, {rwy:rw.name,end:tag,slope:dt.tkS}));
+        }
+      }
+      return {d,appZ,appHalf,appTot,zThr,tag};
+    });
+
+    /* ---- transitional surfaces (runway frame, both sides) ---- */
+    const g0=endGeom[0], g1=endGeom[1];
+    const trS=Math.max(d0.trS,d1.trS)||0;
+    if(trS>0&&ihsH>0){
+      // lower-edge sample stations in u, with (|v|, z)
+      const st=[];
+      const pushAt=(uu,vv,zz)=>st.push({u:uu,v:vv,z:zz});
+      // end-0 flare (u decreasing below strip end)
+      const flareStations=(g,dispv,sign)=>{
+        const d=g.d; if(!(d.appW>0)||!g.appTot)return [];
+        const sMax=(()=>{ let s=d.appD;
+          const step=25; while(s<d.appD+g.appTot&&g.appZ(s)<ihsZ)s+=step; return Math.min(s,d.appD+g.appTot);})();
+        const cross=(sd.half-d.appW/2)/(d.appDiv||1e-9)+d.appD;  // where approach half = strip half
+        const list=[d.appD];
+        if(cross>d.appD&&cross<sMax)list.push(cross);
+        [d.s1L,d.s1L+d.s2L].forEach(x=>{const s=d.appD+x;if(s>d.appD&&s<sMax)list.push(s);});
+        list.push(sMax);
+        return list.sort((a,b)=>a-b).map(s=>({
+          u: sign>0 ? (dispv+s) : (dispv-s),
+          v: Math.max(sd.half,g.appHalf(s)),
+          z: g.appZ(s)}));
+      };
+      const f0=flareStations(g0,uThr0,-1).reverse();  // ordered by increasing u
+      const f1=flareStations(g1,uThr1,+1);
+      const mid=[{u:-sd.endx,v:sd.half,z:zc(-sd.endx)},{u:L+sd.endx,v:sd.half,z:zc(L+sd.endx)}];
+      let chain=f0.concat(mid,f1).filter(s=>isFinite(s.u)).sort((a,b)=>a.u-b.u);
+      // dedupe near-identical stations
+      chain=chain.filter((s,i)=>i===0||Math.abs(s.u-chain[i-1].u)>0.5);
+      for(const sg of [1,-1]){
+        for(let i=0;i<chain.length-1;i++){
+          const s1=chain[i], s2=chain[i+1];
+          if(s1.z>=ihsZ&&s2.z>=ihsZ)continue;
+          const du=s2.u-s1.u; if(Math.abs(du)<0.5)continue;
+          const gz=(s2.z-s1.z)/du, gv=(s2.v-s1.v)/du;
+          const w1=Math.max(0,(ihsZ-s1.z)/trS), w2=Math.max(0,(ihsZ-s2.z)/trS);
+          const Ac=gz-sg*trS*(sg*gv), Bc=sg*trS, Cc=s1.z-sg*trS*(sg*s1.v)-Ac*s1.u;
+          facets.push(facet("tr",rw.name+" transitional",A,u,p,
+            [[s1.u,sg*s1.v],[s2.u,sg*s2.v],[s2.u,sg*(s2.v+w2)],[s1.u,sg*(s1.v+w1)]],
+            Ac,Bc,Cc,{rwy:rw.name,slope:trS}));
+        }
+      }
+    }
+
+    /* ---- inner transitional (OFZ) ---- */
+    const itS=Math.max(d0.itS,d1.itS), iaW=Math.max(d0.iaW,d1.iaW);
+    if(itS>0&&iaW>0&&ihsH>0){
+      const half=iaW/2;
+      const zLow=uu=>{
+        if(uu<uThr0){const s=uThr0-uu; return g0.zThr+(s>d0.iaD?d0.iaS*(s-d0.iaD):0);}
+        if(uu>uThr1){const s=uu-uThr1; return g1.zThr+(s>d1.iaD?d1.iaS*(s-d1.iaD):0);}
+        return zc(uu);
+      };
+      const us=[uThr0-(d0.iaD+d0.iaL),uThr0-d0.iaD,uThr0,uThr1,uThr1+d1.iaD,uThr1+(d1.iaD+d1.iaL)]
+        .filter(v=>isFinite(v)).sort((a,b)=>a-b);
+      for(const sg of [1,-1]){
+        for(let i=0;i<us.length-1;i++){
+          const u1=us[i],u2=us[i+1],du=u2-u1; if(du<0.5)continue;
+          const zA=zLow(u1),zB=zLow(u2);
+          if(zA>=ihsZ&&zB>=ihsZ)continue;
+          const gz=(zB-zA)/du;
+          const w1=Math.max(0,(ihsZ-zA)/itS), w2=Math.max(0,(ihsZ-zB)/itS);
+          const Ac=gz, Bc=sg*itS, Cc=zA-sg*itS*(sg*half)-Ac*u1;
+          facets.push(facet("it",rw.name+" inner transitional",A,u,p,
+            [[u1,sg*half],[u2,sg*half],[u2,sg*(half+w2)],[u1,sg*(half+w1)]],
+            Ac,Bc,Cc,{rwy:rw.name,slope:itS}));
+        }
+      }
+    }
+  });
+
+  /* ---- aerodrome-wide inner horizontal + conical ----
+     Union of the discs about every runway strip end, joined by common
+     tangents = the convex hull of those discs (FAA 77.19(a)(4) construction;
+     small arcs enveloped by tangents drop out automatically).            */
+  let ihsHull=null, conHull=null;
+  if(circles.length&&ihsH>0){
+    const pts=[];circles.forEach(c=>pts.push(...circlePts(c.c,c.r,180)));
+    ihsHull=hull(pts);
+    if(conH>0&&conS>0){
+      const off=conH/conS, p2=[];
+      circles.forEach(c=>p2.push(...circlePts(c.c,c.r+off,180)));
+      conHull=hull(p2);
+    }
+  }
+  return {facets,ihsHull,conHull,ihsZ,ihsH,conH,conS,datum,warn,circles};
+}
+
+/* governing (lowest) surface at a world point */
+function governing(scene,xy){
+  const hits=[];
+  for(const f of scene.facets){
+    if(f.ref)continue;
+    if(inPoly(xy,f.poly))hits.push({type:f.type,label:f.label,z:f.a*xy[0]+f.b*xy[1]+f.c});
+  }
+  if(scene.ihsHull&&inPoly(xy,scene.ihsHull))
+    hits.push({type:"ihs",label:"Inner horizontal",z:scene.ihsZ});
+  if(scene.conHull&&inPoly(xy,scene.conHull)&&!(scene.ihsHull&&inPoly(xy,scene.ihsHull)))
+    hits.push({type:"con",label:"Conical",z:scene.ihsZ+scene.conS*distToPoly(xy,scene.ihsHull)});
+  hits.sort((a,b)=>a.z-b.z);
+  return hits;
+}
+
+/* =========================================================================
+   3. MAP
+   ========================================================================= */
+const BASEMAPS={
+  imagery:{tiles:["https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"],
+    attr:"Imagery &copy; Esri, Maxar, Earthstar Geographics"},
+  dark:{tiles:["https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png"],
+    attr:"&copy; OpenStreetMap contributors &copy; CARTO"}
+};
+let base="imagery", fillOpacity=0.20, scene=null, pickMode=null;
+
+const map=new maplibregl.Map({
+  container:"map", attributionControl:{compact:true},
+  style:{version:8,sources:{b:{type:"raster",tiles:BASEMAPS[base].tiles,tileSize:256,
+    attribution:BASEMAPS[base].attr,maxzoom:19}},
+    layers:[{id:"b",type:"raster",source:"b"}]},
+  center:[-6.25,53.42], zoom:11.4, maxPitch:0, attributionControl:false
+});
+map.addControl(new maplibregl.NavigationControl({showCompass:false}),"top-right");
+map.addControl(new maplibregl.AttributionControl({compact:true}),"bottom-left");
+map.addControl(new maplibregl.ScaleControl({unit:"metric"}),"bottom-left");
+
+map.on("load",()=>{
+  map.addSource("surf",{type:"geojson",data:{type:"FeatureCollection",features:[]}});
+  map.addSource("probe",{type:"geojson",data:{type:"FeatureCollection",features:[]}});
+  ORDER.forEach(t=>{
+    map.addLayer({id:"f-"+t,type:"fill",source:"surf",filter:["==",["get","t"],t],
+      paint:{"fill-color":SURF[t].c,"fill-opacity":t==="strip"?0.12:fillOpacity}});
+    map.addLayer({id:"l-"+t,type:"line",source:"surf",filter:["==",["get","t"],t],
+      paint:{"line-color":SURF[t].c,"line-width":t==="strip"?1:1.2,"line-opacity":.9}});
+  });
+  map.addLayer({id:"p-halo",type:"circle",source:"probe",
+    paint:{"circle-radius":9,"circle-color":"#C8006B","circle-opacity":.25}});
+  map.addLayer({id:"p-dot",type:"circle",source:"probe",
+    paint:{"circle-radius":4,"circle-color":"#fff","circle-stroke-color":"#C8006B","circle-stroke-width":2}});
+  render(true);
+});
+
+map.on("click",e=>{
+  const ll=[e.lngLat.lat,e.lngLat.lng];
+  if(pickMode){ pickMode.set(ll[0],ll[1]); pickMode=null; setHint(null); renderPanel(); render(); return; }
+  state.probe=ll; updateReadout(); render();
+});
+
+function setBasemap(k){
+  base=k;
+  map.getSource("b").setTiles(BASEMAPS[k].tiles);
+}
+function setHint(t){const h=document.getElementById("hint");
+  if(t){h.textContent=t;h.classList.add("on");}else h.classList.remove("on");}
+
+/* ---- scene -> GeoJSON ---- */
+function ringLL(poly){const r=poly.map(([x,y])=>toLL(x,y));r.push(r[0]);return r;}
+function render(fit){
+  scene=buildScene();
+  const feats=[];
+  if(scene){
+    scene.facets.forEach(f=>{
+      if(!state.visible[f.type])return;
+      feats.push({type:"Feature",properties:{t:f.type,label:f.label,
+        zmin:round(f.zmin),zmax:round(f.zmax),slope:f.slope?round(f.slope*100,2)+"%":""},
+        geometry:{type:"Polygon",coordinates:[ringLL(f.poly)]}});
+    });
+    if(scene.ihsHull&&state.visible.ihs)
+      feats.push({type:"Feature",properties:{t:"ihs",label:"Inner horizontal",
+        zmin:round(scene.ihsZ),zmax:round(scene.ihsZ)},
+        geometry:{type:"Polygon",coordinates:[ringLL(scene.ihsHull)]}});
+    if(scene.conHull&&scene.ihsHull&&state.visible.con)
+      feats.push({type:"Feature",properties:{t:"con",label:"Conical",
+        zmin:round(scene.ihsZ),zmax:round(scene.ihsZ+scene.conH)},
+        geometry:{type:"Polygon",coordinates:[ringLL(scene.conHull),ringLL(scene.ihsHull).reverse()]}});
+  }
+  const fc={type:"FeatureCollection",features:feats};
+  if(map.getSource("surf"))map.getSource("surf").setData(fc);
+  if(map.getSource("probe"))map.getSource("probe").setData({type:"FeatureCollection",
+    features:state.probe?[{type:"Feature",properties:{},
+      geometry:{type:"Point",coordinates:[state.probe[1],state.probe[0]]}}]:[]});
+  if(fit&&feats.length){
+    let mnx=180,mny=90,mxx=-180,mxy=-90;
+    feats.forEach(f=>f.geometry.coordinates[0].forEach(([x,y])=>{
+      mnx=Math.min(mnx,x);mxx=Math.max(mxx,x);mny=Math.min(mny,y);mxy=Math.max(mxy,y);}));
+    map.fitBounds([[mnx,mny],[mxx,mxy]],{padding:40,duration:0});
+  }
+  window.__lastFC=fc;
+  updateReadout();
+}
+const round=(v,d)=>{const m=Math.pow(10,d===undefined?1:d);return Math.round(v*m)/m;};
+
+/* ---- readout ---- */
+function updateReadout(){
+  const ro=document.getElementById("readout");
+  if(!state.probe||!scene){ro.classList.remove("on");return;}
+  ro.classList.add("on");
+  const xy=toXY(state.probe[0],state.probe[1]);
+  const hits=governing(scene,xy);
+  const gv=document.getElementById("govval"), gl=document.getElementById("govlbl");
+  const st=document.getElementById("stack");
+  if(!hits.length){gv.textContent="\u2014";gl.textContent="outside all surfaces";st.innerHTML="";}
+  else{
+    gv.textContent=round(hits[0].z,1).toFixed(1)+" m";
+    gl.textContent=SURF[hits[0].type].n+" \u00b7 AMSL";
+    st.innerHTML=hits.map((h,i)=>
+      '<div class="r'+(i===0?' win':'')+'"><span class="bar" style="background:'+SURF[h.type].c+'"></span>'+
+      '<span class="nm">'+esc(h.label)+'</span><span>'+round(h.z,1).toFixed(1)+'</span></div>').join("");
+  }
+  const inp=document.getElementById("obsth"), vd=document.getElementById("verdict");
+  const h=parseFloat(inp.value);
+  if(isNaN(h)||!hits.length){vd.textContent="\u2014";vd.className="";}
+  else{const m=hits[0].z-h;
+    vd.textContent=(m<0?"Penetrates "+round(-m,1)+" m":"Clear by "+round(m,1)+" m");
+    vd.className=m<0?"pen":"clear";}
+}
+document.getElementById("obsth").addEventListener("input",updateReadout);
+document.getElementById("rclose").addEventListener("click",()=>{state.probe=null;render();});
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+/* =========================================================================
+   4. PANEL UI
+   ========================================================================= */
+const FIELDS=[
+  ["Inner horizontal & conical",[
+    ["ihsH","Height above datum","L"],["ihsR","Radius","L"],
+    ["conS","Slope","P"],["conH","Height","L"]]],
+  ["Approach surface",[
+    ["appW","Inner edge width","L"],["appD","Distance from threshold","L"],["appDiv","Divergence each side","P"],
+    ["s1L","1st section length","L"],["s1S","1st section slope","P"],
+    ["s2L","2nd section length","L"],["s2S","2nd section slope","P"],
+    ["horL","Horizontal section length","L"]]],
+  ["Transitional",[["trS","Transitional slope","P"],["itS","Inner transitional slope","P"]]],
+  ["Inner approach",[
+    ["iaW","Width","L"],["iaD","Distance from threshold","L"],["iaL","Length","L"],["iaS","Slope","P"]]],
+  ["Balked landing",[
+    ["blW","Inner edge width","L"],["blD","Distance from threshold","L"],
+    ["blDiv","Divergence each side","P"],["blS","Slope","P"]]]
+];
+const TKFIELDS=[["Take-off climb",[
+  ["tkW","Inner edge width","L"],["tkD","Distance from runway end","L"],["tkDiv","Divergence each side","P"],
+  ["tkFW","Final width","L"],["tkL","Length","L"],["tkS","Slope","P"]]]];
+
+function rs(){return RULESETS[state.ruleset];}
+function ovGet(cat,k){const o=(state.overrides[state.ruleset]||{})[cat]||{};
+  return (k in o)?o[k]:rs().dims[cat][k];}
+function ovSet(cat,k,v){
+  state.overrides[state.ruleset]=state.overrides[state.ruleset]||{};
+  state.overrides[state.ruleset][cat]=state.overrides[state.ruleset][cat]||{};
+  state.overrides[state.ruleset][cat][k]=v;
+}
+function ovClear(cat){if(state.overrides[state.ruleset])delete state.overrides[state.ruleset][cat];}
+
+/* ---------- Runways tab ---------- */
+function renderRwy(){
+  const r=rs();
+  let h='<div class="eyebrow">Aerodrome</div>'+
+    '<div class="row"><label class="f"><span>Ruleset</span><select id="rsSel">'+
+    Object.entries(RULESETS).map(([k,v])=>'<option value="'+k+'"'+(k===state.ruleset?' selected':'')+'>'+esc(v.label)+'</option>').join("")+
+    '</select></label></div>'+
+    '<div class="row"><label class="f"><span>Elevation datum</span><select id="dmSel">'+
+      '<option value="lowestThr"'+(state.datumMode==="lowestThr"?" selected":"")+'>Lowest threshold</option>'+
+      '<option value="arpElev"'+(state.datumMode==="arpElev"?" selected":"")+'>Aerodrome elevation</option>'+
+    '</select></label>'+
+    '<label class="f"><span>ARP elev (m)</span><input type="number" id="arpE" value="'+state.arpElev+'" step="0.1"'+
+      (state.datumMode==="arpElev"?"":" disabled")+'></label></div>';
+
+  if(r.preview) h+='<div class="warnbox"><b>Preview ruleset.</b> Amendment 18 surfaces (OFS/OES) become applicable 21 Nov 2030. Values here are a working set — confirm against the published amendment before using them for a submission.</div>';
+
+  h+='<div class="eyebrow">Runways</div>';
+  state.runways.forEach((rw,i)=>{
+    const geo=rwyInfo(rw);
+    h+='<div class="rwycard'+(rw._open?" open":"")+'" data-i="'+i+'">'+
+      '<header data-act="toggle"><div class="desig">'+esc(rw.ends[0].desig)+'<small>THR</small></div>'+
+      '<div class="sep"></div><div class="desig">'+esc(rw.ends[1].desig)+'<small>THR</small></div>'+
+      '<div class="grow"></div><div class="meta">'+(geo?geo.len.toFixed(0)+' m<br>'+geo.brg.toFixed(1)+'\u00b0T':'set coords')+'</div></header>'+
+      '<div class="rwybody">'+
+        '<label class="f"><span>Designation</span><input type="text" data-p="name" value="'+esc(rw.name)+'"></label>'+
+        endCoordBlock(rw,0)+endCoordBlock(rw,1)+
+        '<div class="row"><label class="f"><span>Strip half-width ('+r.un+')</span>'+
+          '<input type="number" data-p="stripHalf" value="'+(rw.stripHalf!=null?rw.stripHalf:stripDefault(rw).half)+'"></label>'+
+        '<label class="f"><span>Strip end ext ('+r.un+')</span>'+
+          '<input type="number" data-p="stripEnd" value="'+(rw.stripEnd!=null?rw.stripEnd:stripDefault(rw).endx)+'"></label></div>'+
+        '<div class="btnrow"><button class="act warn" data-act="del">Remove runway</button></div>'+
+      '</div></div>';
+  });
+  h+='<div class="btnrow"><button class="act" id="addRwy">Add runway</button>'+
+     '<button class="act ghost" id="demoBtn">Load sample</button></div>'+
+     '<p class="note">Tap the map to probe the governing surface at that point. Coordinates are decimal degrees (WGS-84); elevations are metres AMSL regardless of the ruleset unit.</p>';
+  document.getElementById("tab-rwy").innerHTML=h;
+}
+function stripDefault(rw){const r=rs(),e=rw.ends[0];
+  return {half:((r.stripHalf[e.type]||{})[e.code])||75, endx:r.stripEnd[e.code]!==undefined?r.stripEnd[e.code]:60};}
+function rwyInfo(rw){
+  if(!rw.a.lat&&!rw.a.lon)return null;
+  const m=mPerDeg((rw.a.lat+rw.b.lat)/2);
+  const d=[(rw.b.lon-rw.a.lon)*m.lo,(rw.b.lat-rw.a.lat)*m.la];
+  let brg=Math.atan2(d[0],d[1])/RAD; if(brg<0)brg+=360;
+  return {len:Math.hypot(d[0],d[1]),brg};
+}
+function endCoordBlock(rw,i){
+  const e=rw.ends[i], r=rs(), pt=i?rw.b:rw.a;
+  return '<div class="endblk"><h4>End '+(i?"B":"A")+' \u2014 '+esc(e.desig)+'</h4>'+
+    '<div class="row"><label class="f"><span>Designator</span><input type="text" data-e="'+i+'" data-p="desig" value="'+esc(e.desig)+'"></label>'+
+    '<label class="f"><span>Thr elev (m)</span><input type="number" data-e="'+i+'" data-p="thrElev" value="'+e.thrElev+'" step="0.1"></label></div>'+
+    '<div class="row"><label class="f"><span>Pavement end lat</span><input type="number" data-pt="'+i+'" data-p="lat" value="'+pt.lat+'" step="0.000001"></label>'+
+    '<label class="f"><span>Lon</span><input type="number" data-pt="'+i+'" data-p="lon" value="'+pt.lon+'" step="0.000001"></label></div>'+
+    '<div class="btnrow"><button class="act pick" data-act="pick" data-pt="'+i+'">Pick on map</button></div>'+
+    '<div class="row" style="margin-top:8px"><label class="f"><span>'+esc(r.codeLabel)+'</span>'+
+      '<select data-e="'+i+'" data-p="code">'+r.codes.map(([k,l])=>'<option value="'+k+'"'+(e.code===k?" selected":"")+'>'+l+'</option>').join("")+'</select></label>'+
+    '<label class="f"><span>Approach</span><select data-e="'+i+'" data-p="type">'+
+      r.types.map(([k,l])=>'<option value="'+k+'"'+(e.type===k?" selected":"")+'>'+l+'</option>').join("")+'</select></label></div>'+
+    '<div class="row"><label class="f"><span>Displaced thr ('+r.un+')</span><input type="number" data-e="'+i+'" data-p="disp" value="'+e.disp+'"></label>'+
+    '<label class="f"><span>Clearway ('+r.un+')</span><input type="number" data-e="'+i+'" data-p="clearway" value="'+e.clearway+'"></label></div>'+
+    '</div>';
+}
+
+/* ---------- Parameters tab ---------- */
+function renderPar(){
+  const r=rs();
+  const cats=new Map(), tkcats=new Map();
+  const nice=(e,tk)=>{
+    const cl=(r.codes.find(c=>c[0]===e.code)||["",""])[1];
+    const ty=(r.types.find(t=>t[0]===e.type)||["",""])[1];
+    return tk?cl+" \u00b7 take-off":ty+" \u00b7 "+cl;
+  };
+  state.runways.forEach(rw=>rw.ends.forEach(e=>{
+    const c=catOf(e,false), t=catOf(e,true);
+    cats.set(c,(cats.get(c)?cats.get(c)+", ":"")+e.desig);
+    tkcats.set(t,(tkcats.get(t)?tkcats.get(t)+", ":"")+e.desig);
+    cats.set("~"+c,nice(e,false)); tkcats.set("~"+t,nice(e,true));
+  }));
+  let h='<p class="note">Values below drive the geometry directly. Edit any cell to model a national variation, a non-standard approach, or a "what-if". Units are <b>'+r.un+'</b> for lengths; slopes and divergences are percentages.</p>';
+  const block=(cat,groups,who,nm)=>{
+    if(!r.dims[cat])return "";
+    const dirty=(state.overrides[state.ruleset]||{})[cat];
+    let s='<div class="eyebrow">'+esc(nm||cat)+(dirty?' \u00b7 edited':'')+'</div>'+
+      '<p class="note" style="margin:-2px 0 6px"><b>'+esc(who||"")+'</b></p><table class="dims">';
+    groups.forEach(([g,fs])=>{
+      const any=fs.some(([k])=>r.dims[cat][k]>0);
+      s+='<tr><th colspan="3">'+esc(g)+(any?"":" \u2014 n/a")+'</th></tr>';
+      fs.forEach(([k,lab,kind])=>{
+        const raw=ovGet(cat,k), na=!(r.dims[cat][k]>0)&&!raw;
+        const val=kind==="P"?round(raw*100,3):raw;
+        s+='<tr'+(na?' class="na"':'')+'><td class="k">'+esc(lab)+'</td>'+
+           '<td style="text-align:right"><input type="number" step="any" data-cat="'+cat+'" data-k="'+k+'" data-kind="'+kind+'" value="'+val+'"></td>'+
+           '<td class="u">'+(kind==="P"?"%":r.un)+'</td></tr>';
+      });
+    });
+    s+='</table><div class="btnrow"><button class="act ghost" data-act="resetcat" data-cat="'+cat+'">Reset '+esc(cat)+'</button></div>';
+    return s;
+  };
+  cats.forEach((who,c)=>{if(c[0]!=="~")h+=block(c,FIELDS,"Applies to: "+who,cats.get("~"+c));});
+  tkcats.forEach((who,c)=>{if(c[0]!=="~")h+=block(c,TKFIELDS,"Applies to: "+who,tkcats.get("~"+c));});
+  h+='<div class="warnbox">Only the categories your runways actually use are shown. Change a runway\u2019s code/ADG or approach type to reveal a different column of the table.</div>';
+  document.getElementById("tab-par").innerHTML=h;
+}
+
+/* ---------- Layers tab ---------- */
+function renderLay(){
+  let h='<div class="eyebrow">Surfaces</div><div class="legend">';
+  ORDER.slice().reverse().forEach(t=>{
+    h+='<label><input type="checkbox" data-vis="'+t+'"'+(state.visible[t]?" checked":"")+'>'+
+       '<span class="sw" style="background:'+SURF[t].c+'33;border-color:'+SURF[t].c+'"></span>'+
+       '<span>'+SURF[t].n+'</span></label>';
+  });
+  h+='</div><div class="eyebrow">Display</div>'+
+    '<label class="f"><span>Fill opacity</span><input type="range" id="opa" min="0" max="60" value="'+Math.round(fillOpacity*100)+'"></label>'+
+    '<label class="f"><span>Basemap</span><select id="bm"><option value="imagery"'+(base==="imagery"?" selected":"")+'>Satellite imagery</option>'+
+    '<option value="dark"'+(base==="dark"?" selected":"")+'>Dark street map</option></select></label>'+
+    '<p class="note">Surfaces are drawn in plan. Colours follow chart convention: approach in magenta, transitional in amber, horizontal and conical in the greens.</p>';
+  document.getElementById("tab-lay").innerHTML=h;
+}
+
+/* ---------- Data tab ---------- */
+function renderIO(){
+  const s=scene;
+  let h='<div class="eyebrow">Export</div><div class="btnrow">'+
+    '<button class="act" id="expGeo">Surfaces as GeoJSON</button>'+
+    '<button class="act ghost" id="expCfg">Configuration</button></div>'+
+    '<div class="eyebrow">Import</div>'+
+    '<label class="f"><span>Configuration file</span><input type="file" id="impCfg" accept=".json"></label>'+
+    '<div class="eyebrow">Scene</div><table class="dims">'+
+    (s?'<tr><td class="k">Facets</td><td style="text-align:right;font-family:var(--mono)">'+s.facets.length+'</td></tr>'+
+       '<tr><td class="k">Datum</td><td style="text-align:right;font-family:var(--mono)">'+round(s.datum,1)+' m</td></tr>'+
+       '<tr><td class="k">Inner horizontal</td><td style="text-align:right;font-family:var(--mono)">'+round(s.ihsZ,1)+' m AMSL</td></tr>'+
+       '<tr><td class="k">Conical top</td><td style="text-align:right;font-family:var(--mono)">'+round(s.ihsZ+s.conH,1)+' m AMSL</td></tr>':
+      '<tr><td class="k">No runways defined</td></tr>')+'</table>'+
+    '<div class="eyebrow">Read before you rely on it</div>'+
+    '<p class="note">This is a planning and visualisation aid, not a certified obstacle assessment. Known simplifications:</p>'+
+    '<ul class="note" style="padding-left:18px;margin-top:4px">'+
+    '<li>Local tangent-plane projection about the aerodrome; error grows past ~50 km.</li>'+
+    '<li>Centreline elevation is interpolated linearly between thresholds, so a curved runway profile is approximated.</li>'+
+    '<li>Transitional lower edge follows the outer of the strip edge and the approach splay.</li>'+
+    '<li>Inner transitional and balked landing surfaces are capped at the inner horizontal height.</li>'+
+    '<li>Take-off climb inner-edge elevation uses the runway end elevation, not a surveyed high point in the clearway.</li>'+
+    '<li>Approach surfaces are straight; offset and curved tracks are not modelled.</li></ul>';
+  document.getElementById("tab-io").innerHTML=h;
+}
+
+function renderPanel(){renderRwy();renderPar();renderLay();renderIO();}
+
+/* =========================================================================
+   5. EVENTS
+   ========================================================================= */
+const $=s=>document.querySelector(s);
+document.querySelectorAll('#tabs button').forEach(b=>b.addEventListener("click",()=>{
+  document.querySelectorAll('#tabs button').forEach(x=>x.setAttribute("aria-selected",x===b));
+  document.querySelectorAll('section.tab').forEach(s=>s.classList.toggle("on",s.id==="tab-"+b.dataset.tab));
+  document.getElementById("scroller").scrollTop=0;
+  if(window.innerWidth<=860)$("#panel").classList.remove("min");
+}));
+
+$("#scroller").addEventListener("change",onFieldChange);
+$("#scroller").addEventListener("input",e=>{
+  if(e.target.id==="opa"){fillOpacity=+e.target.value/100;
+    ORDER.forEach(t=>map.setPaintProperty("f-"+t,"fill-opacity",t==="strip"?fillOpacity*0.6:fillOpacity));}
+});
+$("#scroller").addEventListener("click",onPanelClick);
+
+function onFieldChange(e){
+  const el=e.target;
+  if(el.id==="rsSel"){state.ruleset=el.value;migrateEnds();renderPanel();render(true);return;}
+  if(el.id==="dmSel"){state.datumMode=el.value;renderPanel();render();return;}
+  if(el.id==="arpE"){state.arpElev=+el.value;render();return;}
+  if(el.id==="bm"){setBasemap(el.value);return;}
+  if(el.dataset.vis){state.visible[el.dataset.vis]=el.checked;render();return;}
+  if(el.dataset.cat){
+    const v=+el.value, kind=el.dataset.kind;
+    ovSet(el.dataset.cat,el.dataset.k,kind==="P"?v/100:v);
+    render();renderPar();return;
+  }
+  if(el.id==="impCfg"){
+    const f=el.files[0];if(!f)return;const rd=new FileReader();
+    rd.onload=()=>{try{const j=JSON.parse(rd.result);
+      Object.assign(state,{ruleset:j.ruleset||state.ruleset,datumMode:j.datumMode||state.datumMode,
+        arpElev:j.arpElev||0,overrides:j.overrides||{},runways:j.runways||[]});
+      renderPanel();render(true);}catch(err){alert("That file isn\u2019t a valid configuration.");}};
+    rd.readAsText(f);return;
+  }
+  const card=el.closest(".rwycard");if(!card)return;
+  const rw=state.runways[+card.dataset.i];if(!rw)return;
+  const p=el.dataset.p;
+  if(el.dataset.pt!==undefined){ (el.dataset.pt==="1"?rw.b:rw.a)[p]=+el.value; }
+  else if(el.dataset.e!==undefined){
+    const en=rw.ends[+el.dataset.e];
+    en[p]=(p==="desig"||p==="code"||p==="type")?el.value:+el.value;
+    if(p==="code")en.tkCode=el.value;
+    if(p==="desig"&&+el.dataset.e===0)rw.name=el.value+"/"+rw.ends[1].desig;
+    if(p==="desig"&&+el.dataset.e===1)rw.name=rw.ends[0].desig+"/"+el.value;
+  }
+  else if(p==="name")rw.name=el.value;
+  else if(p==="stripHalf"||p==="stripEnd")rw[p]=el.value===""?null:+el.value;
+  renderPanel();render();
+}
+
+function onPanelClick(e){
+  const b=e.target.closest("button,[data-act]");if(!b)return;
+  const act=b.dataset.act;
+  if(b.id==="addRwy"){
+    const c=map.getCenter(), dy=0.004, dx=0.012;
+    state.runways.push(newRunway({name:"NEW",
+      a:{lat:c.lat-dy/2,lon:c.lng-dx/2}, b:{lat:c.lat+dy/2,lon:c.lng+dx/2},
+      ends:[{desig:"A",code:rs().codes[rs().codes.length-1][0],type:rs().types[0][0],thrElev:0,disp:0,clearway:0,tkCode:rs().codes[rs().codes.length-1][0]},
+            {desig:"B",code:rs().codes[rs().codes.length-1][0],type:rs().types[0][0],thrElev:0,disp:0,clearway:0,tkCode:rs().codes[rs().codes.length-1][0]}],
+      _open:true}));
+    renderPanel();render(true);return;
+  }
+  if(b.id==="demoBtn"){location.reload();return;}
+  if(b.id==="expGeo"){download("ols-surfaces.geojson",JSON.stringify(window.__lastFC,null,1));return;}
+  if(b.id==="expCfg"){download("ols-config.json",JSON.stringify({
+    ruleset:state.ruleset,datumMode:state.datumMode,arpElev:state.arpElev,
+    overrides:state.overrides,runways:state.runways},null,1));return;}
+  if(act==="resetcat"){ovClear(b.dataset.cat);renderPar();render();return;}
+  const card=b.closest(".rwycard");if(!card)return;
+  const i=+card.dataset.i, rw=state.runways[i];
+  if(act==="toggle"){rw._open=!rw._open;renderRwy();return;}
+  if(act==="del"){if(confirm("Remove "+rw.name+"?")){state.runways.splice(i,1);renderPanel();render();}return;}
+  if(act==="pick"){
+    const which=b.dataset.pt;
+    pickMode={set:(lat,lon)=>{const t=(which==="1"?rw.b:rw.a);t.lat=+lat.toFixed(6);t.lon=+lon.toFixed(6);}};
+    setHint("Tap the map to set "+(which==="1"?"end B":"end A")+" of "+rw.name);
+    if(window.innerWidth<=860)$("#panel").classList.add("min");
+    return;
+  }
+}
+
+/* keep end code/type valid when the ruleset changes */
+function migrateEnds(){
+  const r=rs(), codes=r.codes.map(c=>c[0]), types=r.types.map(t=>t[0]);
+  state.runways.forEach(rw=>rw.ends.forEach(e=>{
+    if(!codes.includes(e.code))e.code=codes[codes.length-1];
+    if(!types.includes(e.type))e.type=types[types.length-1];
+    e.tkCode=e.code;
+  }));
+  state.runways.forEach(rw=>{rw.stripHalf=null;rw.stripEnd=null;});
+}
+
+function download(name,text){
+  const b=new Blob([text],{type:"application/json"}), u=URL.createObjectURL(b);
+  const a=document.createElement("a");a.href=u;a.download=name;a.click();
+  setTimeout(()=>URL.revokeObjectURL(u),2000);
+}
+
+/* mobile bottom-sheet */
+$("#brand").addEventListener("click",()=>{
+  if(window.innerWidth>860)return;
+  const p=$("#panel");
+  if(p.classList.contains("min"))p.classList.remove("min");
+  else if(p.classList.contains("max"))p.classList.remove("max");
+  else p.classList.add("min");
+  document.querySelector("#brand .toggle").textContent=p.classList.contains("min")?"Show":"Hide";
+  setTimeout(()=>map.resize(),240);
+});
+
+/* PWA */
+if("serviceWorker" in navigator){
+  window.addEventListener("load",()=>{
+    navigator.serviceWorker.register("sw.js").catch(()=>{/* not served over http(s) */});
+  });
+}
+
+renderPanel();
+</script>
+</body>
+</html>

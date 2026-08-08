@@ -1,0 +1,16 @@
+{
+  "name": "OLS Plotter — obstacle limitation surfaces",
+  "short_name": "OLS Plotter",
+  "description": "Draw ICAO Annex 14, Amendment 18 and FAA Part 77 obstacle limitation surfaces over satellite imagery for multi-runway aerodromes.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#141A1D",
+  "theme_color": "#141A1D",
+  "icons": [
+    {"src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+    {"src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+  ]
+}
